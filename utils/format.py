@@ -56,15 +56,15 @@ def normalize_text(texto):
 
 def consolidate_executives(name):
     """
-    Padroniza nomes de executivos e filtra Vendas Externas.
+    Padroniza nomes de executivos e agrupa variações.
     """
     if not isinstance(name, str): return name
     name_upper = name.upper()
     
-    # Filtro: Vendas Externas viram Nulo para cair no N/A
-    if "VENDA EXTERNA" in name_upper: return None 
+    # REMOVIDO: O filtro que excluía "VENDA EXTERNA" foi apagado.
+    # Agora eles passarão normalmente.
 
-    # Regras de Aglomeração
+    # Regras de Aglomeração (Padronização de nomes repetidos)
     if "EDUARDO" in name_upper: return "Eduardo Notomi"
     if "JULIA" in name_upper: return "Julia Bergo"
     if "OLGA" in name_upper: return "Olga Luiza"
@@ -98,12 +98,11 @@ def normalize_dataframe(df_raw: pd.DataFrame) -> pd.DataFrame:
     for col in ["Emissora", "Cliente", "Executivo"]:
         df[col] = df[col].apply(normalize_text)
 
-    # 4. Consolidação de Executivos (Aglomeração e Filtro)
+    # 4. Consolidação de Executivos (Aglomeração sem filtro de exclusão)
     df["Executivo"] = df["Executivo"].apply(consolidate_executives)
     
-    # --- CORREÇÃO: Substitui vazios e None por "N/A" ---
+    # Preenche vazios reais com N/A (Vendas Externas NÃO cairão aqui pois têm nome)
     df["Executivo"] = df["Executivo"].replace(["", "nan", "None"], np.nan).fillna("N/A")
-    # ---------------------------------------------------
 
     # 5. Detecção e Conversão de Datas
     if "data_ref" in df.columns:
