@@ -25,7 +25,8 @@ from utils.filters import aplicar_filtros
 from utils.format import normalize_dataframe
 
 # Importação das páginas
-from pages import inicio, visao_geral, clientes_faturamento, perdas_ganhos, cruzamentos_intersecoes, top10, crowley
+# ATUALIZADO: 'crowley' removido, 'relatorio_abc' e 'eficiencia' adicionados
+from pages import inicio, visao_geral, clientes_faturamento, perdas_ganhos, cruzamentos_intersecoes, top10, relatorio_abc, eficiencia
 
 # ==================== CONFIGURAÇÕES GERAIS ====================
 st.set_page_config(
@@ -141,7 +142,9 @@ if os.path.exists(logo_path):
 # ==================== CARREGAMENTO DE DADOS ====================
 query_params = st.query_params
 nav_id = query_params.get("nav", ["0"])[0]
-pages_keys = ["Início", "Visão Geral", "Clientes & Faturamento", "Perdas & Ganhos", "Cruzamentos & Interseções", "Top 10", "Crowley ABC"]
+
+# ATUALIZADO: Lista de páginas com os nomes corretos
+pages_keys = ["Início", "Visão Geral", "Clientes & Faturamento", "Perdas & Ganhos", "Cruzamentos & Interseções", "Top 10", "Relatório ABC", "Eficiência"]
 
 try:
     idx_ativa = int(nav_id)
@@ -196,6 +199,7 @@ if df is None or df.empty:
 
 
 # ==================== MENU LATERAL ====================
+# ATUALIZADO: Mapeamento correto das páginas
 pages = {
     "Início": inicio,
     "Visão Geral": visao_geral,
@@ -203,7 +207,8 @@ pages = {
     "Perdas & Ganhos": perdas_ganhos,
     "Cruzamentos & Interseções": cruzamentos_intersecoes,
     "Top 10": top10,
-    "Crowley ABC": crowley,
+    "Relatório ABC": relatorio_abc, # Novo nome do módulo
+    "Eficiência": eficiencia, # Nova página
 }
 
 page_display = {
@@ -213,7 +218,8 @@ page_display = {
     "Perdas & Ganhos": "Perdas & Ganhos",
     "Cruzamentos & Interseções": "Cruzamentos & Interseções",
     "Top 10": "Top 10",
-    "Crowley ABC": "Relatório ABC",
+    "Relatório ABC": "Relatório ABC",
+    "Eficiência": "Eficiência / KPIs",
 }
 
 st.sidebar.markdown('<p style="font-size:0.85rem; font-weight:600; margin-bottom: 0.5rem; margin-left: 10px;">Selecione a página:</p>', unsafe_allow_html=True)
@@ -229,9 +235,8 @@ for idx, page_name in enumerate(pages_keys):
 st.sidebar.markdown(f'<div class="sidebar-nav-container">{"".join(html_menu)}</div>', unsafe_allow_html=True)
 st.sidebar.divider()
 
-# ==================== POP-UPS (DIÁLOGOS SEQUENCIAIS) ====================
+# ==================== POP-UPS ====================
 
-# --- 1. Modal de Boas-vindas ---
 @st.dialog("Banner de Boas-vindas", width="medium")
 def modal_boas_vindas():
     st.markdown("""
@@ -264,7 +269,6 @@ def modal_boas_vindas():
         cookies.save()
         st.rerun()
 
-# --- 2. Modal de Aviso de Dados (Novo) ---
 @st.dialog("Aviso Importante: Dados", width="small")
 def modal_aviso_dados():
     st.warning("⚠️ Atenção: Dados em Homologação")
@@ -280,10 +284,7 @@ def modal_aviso_dados():
         cookies.save()
         st.rerun()
 
-# --- Lógica de Exibição Sequencial ---
 if st.session_state.authenticated:
-    
-    # Verificação 1: Boas-vindas
     show_welcome = False
     last_view_str = cookies.get("last_popup_view")
     if not last_view_str:
@@ -296,7 +297,6 @@ if st.session_state.authenticated:
         except ValueError:
             show_welcome = True
 
-    # Verificação 2: Aviso de Dados
     show_disclaimer = False
     last_disc_str = cookies.get("last_disclaimer_view")
     if not last_disc_str:
@@ -309,7 +309,6 @@ if st.session_state.authenticated:
         except ValueError:
             show_disclaimer = True
 
-    # Execução (Prioridade para Boas-vindas -> depois Aviso)
     if show_welcome:
         modal_boas_vindas()
     elif show_disclaimer:
@@ -328,7 +327,7 @@ else:
     
     pages[pagina_ativa].render(df_filtrado, mes_ini, mes_fim, show_labels, ultima_atualizacao)
 
-# ==================== RODAPÉ GLOBAL CENTRALIZADO ====================
+# ==================== RODAPÉ ====================
 footer_html = """
 <div class="footer-container">
     <p class="footer-text">Powered by Python | Interface Streamlit | Data Driven Novabrasil</p>
