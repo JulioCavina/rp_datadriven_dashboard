@@ -1,0 +1,307 @@
+# streamlit_app.py
+import os
+import streamlit as st
+from PIL import Image
+import pandas as pd
+from datetime import datetime, timedelta
+import base64 
+import streamlit_cookies_manager 
+import json 
+import locale
+import platform
+
+# Tenta configurar locale para pt-BR
+try:
+    locale.setlocale(locale.LC_TIME, 'pt_BR.UTF-8')
+except locale.Error:
+    try:
+        locale.setlocale(locale.LC_TIME, 'Portuguese_Brazil')
+    except locale.Error:
+        print("AVISO: Não foi possível definir o locale para pt-BR.")
+
+# Importações dos módulos
+from utils.loaders import load_main_base
+from utils.filters import aplicar_filtros
+from utils.format import normalize_dataframe
+
+# Importação das páginas (Atualizado com cruzamentos_intersecoes)
+from pages import inicio, visao_geral, clientes_faturamento, perdas_ganhos, cruzamentos_intersecoes, top10, crowley
+
+# ==================== CONFIGURAÇÕES GERAIS ====================
+st.set_page_config(
+    page_title="Dashboard Vendas Ribeirão Preto",
+    layout="wide",
+    initial_sidebar_state="expanded"
+)
+
+# ==================== LÓGICA DE AUTENTICAÇÃO ====================
+
+cookies = streamlit_cookies_manager.CookieManager()
+if not cookies.ready():
+    st.spinner("Carregando...")
+    st.stop()
+
+if not st.session_state.get("authenticated", False):
+    auth_cookie = cookies.get("auth_token")
+    if auth_cookie == "user_is_logged_in":
+        st.session_state.authenticated = True
+    else:
+        st.session_state.authenticated = False
+
+if "filters_loaded" not in st.session_state:
+    filter_cookie = cookies.get("app_filters")
+    if filter_cookie:
+        try:
+            saved_filters = json.loads(filter_cookie)
+            for key, value in saved_filters.items():
+                st.session_state[key] = value
+        except Exception:
+            pass 
+    st.session_state.filters_loaded = True 
+
+if not st.session_state.authenticated:
+    hide_elements_style = """
+        <style>
+            [data-testid="stSidebar"] {display: none;}
+            [data-testid="stHeader"] {display: none;}
+            [data-testid="stToolbar"] {display: none;}
+            .main {padding-top: 2rem;}
+        </style>
+    """
+    st.markdown(hide_elements_style, unsafe_allow_html=True)
+
+    col1, col2, col3 = st.columns([1, 1.5, 1])
+    with col2:
+        logo_path = os.path.join("assets", "NOVABRASIL_TH+_LOGOS_VETORIAIS-07.png")
+        if os.path.exists(logo_path):
+            st.image(logo_path, width=200)
+        
+        st.markdown("#### 🔒 Acesso Restrito")
+        
+        with st.form(key="login_form"):
+            password = st.text_input(
+                "Por favor, insira a senha para acessar o dashboard:", 
+                type="password",
+                key="password_input"
+            )
+            submitted = st.form_submit_button("Entrar")
+
+        if submitted:
+            if password.strip().lower() == "datadrivenrp":
+                st.session_state.authenticated = True
+                cookies["auth_token"] = "user_is_logged_in"
+                cookies.save() 
+                st.rerun() 
+            else:
+                st.error("Senha incorreta. Tente novamente.")
+                st.session_state.authenticated = False
+    st.stop()
+
+# ==================== APP PRINCIPAL ====================
+
+def set_favicon(icon_path):
+    try:
+        if not os.path.exists(icon_path):
+            return
+        with open(icon_path, "rb") as f:
+            icon_base64 = base64.b64encode(f.read()).decode()
+        favicon_html = f"""
+            <link rel="icon" type="image/png" href="data:image/png;base64,{icon_base64}">
+            <link rel="shortcut icon" type="image/png" href="data:image/png;base64,{icon_base64}">
+        """
+        st.markdown(favicon_html, unsafe_allow_html=True)
+    except Exception as e:
+        st.error(f"❌ Erro ao processar o ícone: {e}")
+
+set_favicon(os.path.join("assets", "icone.png"))
+
+def local_css(file_name):
+    if os.path.exists(file_name):
+        with open(file_name, encoding="utf-8") as f:
+            st.markdown(f"<style>{f.read()}</style>", unsafe_allow_html=True)
+    else:
+        st.warning(f"Arquivo de estilo não encontrado: {file_name}")
+
+local_css("utils/style.css")
+
+hide_default_format = """
+    <style>
+    [data-testid="stSidebarNav"] {display: none;}
+    </style>
+"""
+st.markdown(hide_default_format, unsafe_allow_html=True)
+
+# ==================== LOGO E PALETA ====================
+PALETTE = ["#007dc3", "#00a8e0", "#7ad1e6", "#004b8d", "#0095d9"]
+logo_path = os.path.join("assets", "NOVABRASIL_TH+_LOGOS_VETORIAIS-07.png")
+if os.path.exists(logo_path):
+    logo = Image.open(logo_path)
+    st.sidebar.image(logo, width=160) 
+
+# ==================== CARREGAMENTO DE DADOS ====================
+# Botão Voltar ao Menu (Invisível na Home)
+query_params = st.query_params
+nav_id = query_params.get("nav", ["0"])[0]
+pages_keys = ["Início", "Visão Geral", "Clientes & Faturamento", "Perdas & Ganhos", "Cruzamentos & Interseções", "Top 10", "Crowley ABC"]
+
+try:
+    # Garante que nav_id é int, caso contrário assume 0
+    idx_ativa = int(nav_id)
+    if idx_ativa < 0 or idx_ativa >= len(pages_keys):
+        idx_ativa = 0
+except ValueError:
+    idx_ativa = 0
+
+pagina_ativa = pages_keys[idx_ativa]
+
+# Renderiza o botão de voltar apenas se NÃO for a página Início
+if pagina_ativa != "Início":
+    st.markdown("""
+        <a href="?nav=0" target="_self" class="nav-back-link">
+            ⬅ Voltar ao Menu Principal
+        </a>
+    """, unsafe_allow_html=True)
+
+# Título e Legenda Padrão (Abaixo do botão de voltar)
+if pagina_ativa == "Início":
+    st.title("Dashboard Vendas Ribeirão Preto")
+    st.caption("Menu lateral para navegar • Filtros no topo • Exportação em Excel")
+
+df, ultima_atualizacao = load_main_base()
+
+if df is None or df.empty:
+    st.warning("⚠️ Nenhuma base de dados encontrada.")
+    st.info("Por favor, carregue a planilha de vendas (.xlsx) para iniciar.")
+    
+    uploaded_file = st.file_uploader(
+        "Selecione o arquivo Excel (.xlsx)", 
+        type=["xlsx"],
+        accept_multiple_files=False
+    )
+    
+    if uploaded_file is not None:
+        try:
+            base_dir = os.path.dirname(__file__)
+            data_dir = os.path.join(base_dir, "data")
+            if not os.path.exists(data_dir):
+                os.makedirs(data_dir)
+            
+            save_path = os.path.join(data_dir, "temp_data_uploaded.xlsx")
+            with open(save_path, "wb") as f:
+                f.write(uploaded_file.getbuffer())
+
+            st.success("✅ Arquivo carregado. O dashboard será iniciado.")
+            st.rerun()
+
+        except Exception as e:
+            st.error(f"Erro ao processar o arquivo: {e}")
+            
+    st.stop() 
+
+
+# ==================== MENU LATERAL ====================
+# Atualizado com o novo módulo de cruzamentos
+pages = {
+    "Início": inicio,
+    "Visão Geral": visao_geral,
+    "Clientes & Faturamento": clientes_faturamento,
+    "Perdas & Ganhos": perdas_ganhos,
+    "Cruzamentos & Interseções": cruzamentos_intersecoes,
+    "Top 10": top10,
+    "Crowley ABC": crowley,
+}
+
+page_display = {
+    "Início": "Início",
+    "Visão Geral": "Visão Geral",
+    "Clientes & Faturamento": "Clientes & Faturamento",
+    "Perdas & Ganhos": "Perdas & Ganhos",
+    "Cruzamentos & Interseções": "Cruzamentos & Interseções",
+    "Top 10": "Top 10",
+    "Crowley ABC": "Relatório ABC", # Ajustei o nome display para ficar mais bonito
+}
+
+st.sidebar.markdown('<p style="font-size:0.85rem; font-weight:600; margin-bottom: 0.5rem; margin-left: 10px;">Selecione a página:</p>', unsafe_allow_html=True)
+
+html_menu = []
+for idx, page_name in enumerate(pages_keys):
+    is_active = "active" if page_name == pagina_ativa else ""
+    display_name = page_display.get(page_name, page_name) 
+    html_menu.append(
+        f'<a class="sidebar-nav-btn {is_active}" href="?nav={idx}" target="_self">{display_name}</a>'
+    )
+
+st.sidebar.markdown(f'<div class="sidebar-nav-container">{"".join(html_menu)}</div>', unsafe_allow_html=True)
+st.sidebar.divider()
+
+# ==================== POP-UP DE BOAS-VINDAS ====================
+@st.dialog("Banner de Boas-vindas", width="medium")
+def modal_boas_vindas():
+    st.markdown("""
+        <div class="popup-title-styled">Dashboard Vendas Ribeirão Preto</div>
+        <div class="popup-subtitle">Projeto Data Driven Novabrasil | Powered by Streamlit</div>
+    """, unsafe_allow_html=True)
+
+    with st.container(height=350, border=True):
+        st.markdown("""
+        ### Como Navegar:
+        * **Menu Lateral:** Utilize os botões abaixo ou à esquerda na barra lateral para navegar entre as páginas.
+        * **Filtros Globais:** No topo das páginas, selecione o filtro desejado para sua busca.
+        * **Exportação:** Selecione no final das páginas para exportar tabelas ou gráficos.
+        ---
+        ### O que você vai encontrar:
+        * **Visão Geral:** KPIs rápidos e metas.
+        * **Clientes & Faturamento:** Análise detalhada.
+        * **Perdas & Ganhos:** Churn e Novos Negócios.
+        * **Cruzamentos:** Clientes exclusivos vs. compartilhados.
+        * **Top 10:** Ranking anunciantes.
+        * **Relatório ABC:** Curva de Pareto (80/20).
+        ---
+        """)
+        st.markdown("**Dúvidas:** (31) 9.9274-4574 - Silvia Freitas - Head de Inteligência de Mercado")
+
+    st.markdown("<div style='height: 15px;'></div>", unsafe_allow_html=True) 
+    
+    if st.button("Entendido", type="secondary"): 
+        cookies["last_popup_view"] = datetime.now().isoformat()
+        cookies.save()
+        st.rerun()
+
+should_show_popup = False
+last_view_str = cookies.get("last_popup_view")
+if not last_view_str:
+    should_show_popup = True
+else:
+    try:
+        last_view = datetime.fromisoformat(last_view_str)
+        if datetime.now() - last_view > timedelta(hours=24):
+            should_show_popup = True
+    except ValueError:
+        should_show_popup = True
+
+if st.session_state.authenticated and should_show_popup:
+    modal_boas_vindas()
+
+
+# ==================== ROTEAMENTO ====================
+if pagina_ativa == "Início":
+    pages[pagina_ativa].render(df) # Início não recebe date
+else:
+    df_filtrado, anos_sel, emis_sel, exec_sel, cli_sel, mes_ini, mes_fim, show_labels = aplicar_filtros(df, cookies)
+
+    if df_filtrado is None or df_filtrado.empty:
+        st.warning("⚠️ Nenhum dado encontrado com os filtros aplicados.")
+        st.stop()
+    
+    # CORREÇÃO APLICADA AQUI:
+    # Todas as páginas (exceto Início) agora recebem a assinatura completa, inclusive o Crowley ABC.
+    pages[pagina_ativa].render(df_filtrado, mes_ini, mes_fim, show_labels, ultima_atualizacao)
+
+# ==================== RODAPÉ GLOBAL CENTRALIZADO (SEM DATA) ====================
+footer_html = """
+<div class="footer-container">
+    <p class="footer-text">Powered by Python | Interface Streamlit | Data Driven Novabrasil</p>
+    <p class="footer-text">Conteúdo Confidencial. A distribuição a terceiros não autorizados é estritamente proibida.</p>
+</div>
+"""
+st.markdown(footer_html, unsafe_allow_html=True)

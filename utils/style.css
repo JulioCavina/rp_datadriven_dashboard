@@ -1,0 +1,214 @@
+/*utils/style.css*/
+
+
+/* ==================== CUSTOMIZAÇÃO GERAL ==================== */
+:root {
+    --azul-nb: #007bff;
+    --azul-escuro: #004a99;
+}
+
+/* Ajuste fino nos selects e multiselects */
+[data-testid="stMultiSelect"] [data-baseweb="tag"] {
+    background-color: var(--azul-nb) !important;
+    color: white !important;
+    border-radius: 6px !important;
+}
+[data-testid="stMultiSelect"] [data-baseweb="tag"] span {
+    color: white !important;
+    font-weight: 600 !important;
+}
+[data-testid="stMultiSelect"] [data-baseweb="tag"] svg {
+    fill: white !important;
+}
+[data-baseweb="select"] > div {
+    border: 1.5px solid var(--azul-nb) !important;
+    border-radius: 8px !important;
+    background-color: rgba(0,123,255,0.03) !important;
+}
+[data-baseweb="select"]:focus-within > div {
+    border-color: var(--azul-escuro) !important;
+    box-shadow: 0 0 0 3px rgba(0,123,255,0.2) !important;
+}
+
+/* Slider Customizado */
+.stSlider .rc-slider-track { background: var(--azul-nb) !important; height: 6px !important; }
+.stSlider .rc-slider-rail { background: rgba(0,123,255,0.15) !important; height: 6px !important; }
+.stSlider .rc-slider-handle {
+    border: 2px solid var(--azul-escuro) !important;
+    background: var(--azul-nb) !important;
+    box-shadow: 0 0 5px rgba(0,91,187,0.3) !important;
+}
+
+/* ==================== FORÇAR BOTÕES AZUIS (NOVABRASIL) ==================== */
+/* Isso resolve a questão dos botões vermelhos no gráfico de matriz */
+
+/* Botão Primário (Ativo/Cheio) */
+button[kind="primary"] {
+    background-color: var(--azul-nb) !important;
+    border-color: var(--azul-nb) !important;
+    color: white !important;
+}
+button[kind="primary"]:hover, button[kind="primary"]:focus {
+    background-color: var(--azul-escuro) !important;
+    border-color: var(--azul-escuro) !important;
+    color: white !important;
+}
+
+/* Botão Secundário (Borda) */
+button[kind="secondary"] {
+    background-color: transparent !important;
+    color: var(--azul-nb) !important;
+    border: 1.5px solid var(--azul-nb) !important;
+}
+button[kind="secondary"]:hover, button[kind="secondary"]:focus {
+    background-color: rgba(0, 123, 255, 0.1) !important;
+    color: var(--azul-escuro) !important;
+    border-color: var(--azul-escuro) !important;
+}
+
+/* ==================== LINK "VOLTAR AO MENU" ==================== */
+.nav-back-link {
+    display: inline-flex;
+    align-items: center;
+    text-decoration: none !important;
+    color: #666 !important;
+    font-size: 0.85rem;
+    font-weight: 600;
+    margin-bottom: 0px; /* Não empurrar muito pra baixo */
+    transition: all 0.2s;
+}
+.nav-back-link:hover {
+    color: var(--azul-nb) !important;
+    transform: translateX(-3px); /* Efeito visual leve */
+}
+
+/* ==================== BARRA LATERAL (SIDEBAR) ==================== */
+
+/* Forçar largura menor da sidebar */
+[data-testid="stSidebar"] {
+    min-width: 220px !important;
+    max-width: 220px !important;
+    width: 220px !important;
+}
+
+/* Reduzir fonte de todos os elementos da sidebar */
+[data-testid="stSidebar"] * {
+    font-size: 0.85rem !important;
+}
+
+/* Botões de navegação na sidebar */
+.sidebar-nav-btn {
+    display: block;
+    padding: 8px 10px;
+    margin: 4px 10px;
+    border-radius: 6px; 
+    color: #004a99; 
+    text-decoration: none !important; 
+    font-weight: 600;
+    transition: all 0.1s;
+    background-color: transparent;
+    cursor: pointer;
+    text-align: left; 
+    font-size: 0.85rem !important; 
+}
+.sidebar-nav-btn:hover {
+    background-color: rgba(0, 123, 255, 0.1);
+    color: #007bff;
+    text-decoration: none !important; 
+}
+.sidebar-nav-btn.active {
+    background-color: var(--azul-nb) !important;
+    color: white !important;
+    font-weight: 700 !important;
+    border-radius: 6px !important; 
+    box-shadow: 0 2px 5px rgba(0, 0, 0, 0.1);
+}
+
+/* Texto auxiliar na sidebar */
+.sidebar-nav-container + div > p {
+    font-size: 0.8rem; 
+    font-weight: 600; 
+    color: #004a99; 
+}
+
+/* ==================== POP-UP / MODAL ==================== */
+[data-testid="stDialog"] [data-testid="stMarkdownContainer"] p {
+    font-size: 1rem !important;
+    color: #333 !important; 
+}
+[data-testid="stDialog"] label {
+    font-size: 1.1rem !important;
+    font-weight: 600 !important;
+    color: #003366 !important;
+}
+/* Botões dentro do modal seguem a regra global de secondary, 
+   mas garantimos o background branco aqui se necessário */
+[data-testid="stDialog"] button[kind="secondary"] {
+    background-color: #ffffff !important;
+    min-height: 40px !important;
+}
+
+[data-testid="stDialog"] [aria-label="Close"] svg {
+    fill: #000 !important;
+    stroke: #000 !important;
+}
+[data-testid="stDialog"] [aria-label="Close"] {
+    border: none !important;
+    box-shadow: none !important;
+    background-color: transparent !important;
+}
+
+/* Títulos do Modal */
+.popup-title-styled {
+    color: #004a99;
+    text-align: center;
+    font-size: 1.8rem;
+    font-weight: bold;
+    margin-bottom: 0.5rem;
+}
+.popup-subtitle {
+    text-align: center;
+    color: #444;
+    margin-bottom: 1.5rem;
+    font-size: 1.1rem;
+}
+
+/* ==================== TOGGLE ==================== */
+[data-testid="stToggle"] [data-baseweb="checkbox"] > div {
+    background-color: #ccc !important;
+    border-color: #aaa !important;
+}
+[data-testid="stToggle"] [data-baseweb="checkbox"] input:checked + div {
+    background-color: var(--azul-nb) !important;
+    border-color: var(--azul-escuro) !important;
+}
+
+/* ==================== CHART TITLES & LABELS ==================== */
+.custom-chart-title {
+    font-size: 1.1rem;
+    font-weight: bold;
+    color: #003366;
+    margin-bottom: 0px;
+    text-align: center;
+}
+label, .stMarkdown h3, .stMarkdown h4 {
+    color: #003366 !important;
+    font-size: 1rem !important;
+    font-weight: 600 !important;
+}
+
+/* ==================== RODAPÉ CENTRALIZADO ==================== */
+.footer-container {
+    width: 100%;
+    text-align: center;
+    margin-top: 3rem;
+    padding-top: 1rem;
+    border-top: 1px solid #eee;
+}
+
+.footer-text {
+    font-size: 0.75rem;
+    color: #666;
+    margin: 0;
+    padding: 2px;
+}
