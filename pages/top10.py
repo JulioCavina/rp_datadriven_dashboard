@@ -87,7 +87,8 @@ def render(df, mes_ini, mes_fim, show_labels, ultima_atualizacao=None):
     
     criterio = st.session_state.top10_metric
 
-    col1, col2, col3 = st.columns([2, 1, 1.5])
+    # Ajuste de colunas para caber 3 botões
+    col1, col2, col3 = st.columns([1.5, 1, 2.5])
     
     # Opção de Consolidado
     opcoes_emissora = ["Consolidado (Seleção Atual)"] + emis_list
@@ -95,14 +96,15 @@ def render(df, mes_ini, mes_fim, show_labels, ultima_atualizacao=None):
     emis_sel = col1.selectbox("Emissora / Visão", opcoes_emissora)
     ano_sel = col2.selectbox("Ano", anos_list, index=len(anos_list)-1)
     
-    # --- BOTÕES ESTILIZADOS (SUBSTITUI RADIO) ---
+    # --- BOTÕES ESTILIZADOS (3 Opções) ---
     with col3:
         st.markdown('<p style="font-size:0.85rem; font-weight:600; margin-bottom: 0px;">Classificar por:</p>', unsafe_allow_html=True)
-        b1, b2 = st.columns(2)
+        b1, b2, b3 = st.columns(3)
         
         # Define estilo (Primary = Azul/Ativo, Secondary = Branco/Inativo)
         type_fat = "primary" if criterio == "Faturamento" else "secondary"
         type_ins = "primary" if criterio == "Inserções" else "secondary"
+        type_efc = "primary" if criterio == "Menor Custo Unitário" else "secondary"
         
         if b1.button("Faturamento", type=type_fat, use_container_width=True):
             st.session_state.top10_metric = "Faturamento"
@@ -112,62 +114,102 @@ def render(df, mes_ini, mes_fim, show_labels, ultima_atualizacao=None):
             st.session_state.top10_metric = "Inserções"
             st.rerun()
 
+        if b3.button("Menor Custo Unitário", type=type_efc, use_container_width=True):
+            st.session_state.top10_metric = "Menor Custo Unitário"
+            st.rerun()
+
     # Lógica de Filtro baseada na seleção
     if emis_sel == "Consolidado (Seleção Atual)":
         base = base_periodo[base_periodo["ano"] == ano_sel]
-        cor_grafico = PALETTE[3] 
+        cor_grafico = PALETTE[3] # Azul Escuro
     else:
         base = base_periodo[(base_periodo["ano"] == ano_sel) & (base_periodo["emissora"] == emis_sel)]
-        cor_grafico = PALETTE[0] 
+        cor_grafico = PALETTE[0] # Azul Claro
 
     # ==================== PROCESSAMENTO ====================
-    # Agrupa por cliente somando ambas as métricas
+    # Agrupa por cliente somando métricas
     top10_raw = base.groupby("cliente", as_index=False).agg(
         faturamento=("faturamento", "sum"),
         insercoes=("insercoes", "sum")
     )
     
+    # Calcula Custo Unitário
+    # Evita divisão por zero e infinitos
+    top10_raw["custo_unitario"] = np.where(
+        top10_raw["insercoes"] > 0, 
+        top10_raw["faturamento"] / top10_raw["insercoes"], 
+        np.nan
+    )
+
     # Ordena pelo critério selecionado
-    col_sort = "faturamento" if criterio == "Faturamento" else "insercoes"
-    top10_raw = top10_raw.sort_values(col_sort, ascending=False).head(10)
+    if criterio == "Faturamento":
+        col_sort = "faturamento"
+        ascending = False
+    elif criterio == "Inserções":
+        col_sort = "insercoes"
+        ascending = False
+    else: # Menor Custo Unitário
+        col_sort = "custo_unitario"
+        ascending = True # Do menor para o maior
+        # Filtra clientes sem inserções para não poluir o ranking de eficiência com zeros inválidos
+        top10_raw = top10_raw[top10_raw["insercoes"] > 0]
+
+    # Pega Top 10
+    top10_raw = top10_raw.sort_values(col_sort, ascending=ascending).head(10)
 
     if not top10_raw.empty:
         # Tabela com Totalizador para exportação
         top10_with_total = top10_raw.copy()
         
+        # Totais (Custo Unitário do total é recalculado)
+        tot_fat = top10_with_total["faturamento"].sum()
+        tot_ins = top10_with_total["insercoes"].sum()
+        tot_custo = tot_fat / tot_ins if tot_ins > 0 else np.nan
+
         total_row = {
             "cliente": "Totalizador", 
-            "faturamento": top10_with_total["faturamento"].sum(),
-            "insercoes": top10_with_total["insercoes"].sum()
+            "faturamento": tot_fat,
+            "insercoes": tot_ins,
+            "custo_unitario": tot_custo
         }
         top10_with_total = pd.concat([top10_with_total, pd.DataFrame([total_row])], ignore_index=True)
         top10_with_total.insert(0, "#", list(range(1, len(top10_raw) + 1)) + ["Total"])
         top10_raw_export = top10_with_total.copy()
 
-        # Display Tabela (Mostra as duas métricas sempre)
+        # Display Tabela (Mostra as 3 métricas sempre)
         top10_display = top10_with_total.copy()
         top10_display['#'] = top10_display['#'].astype(str)
         top10_display["faturamento_fmt"] = top10_display["faturamento"].apply(brl)
         top10_display["insercoes_fmt"] = top10_display["insercoes"].apply(format_int)
+        top10_display["custo_fmt"] = top10_display["custo_unitario"].apply(brl)
         
-        tabela = top10_display[["#", "cliente", "faturamento_fmt", "insercoes_fmt"]].rename(columns={
+        tabela = top10_display[["#", "cliente", "faturamento_fmt", "insercoes_fmt", "custo_fmt"]].rename(columns={
             "cliente": "Cliente", 
             "faturamento_fmt": "Faturamento",
-            "insercoes_fmt": "Inserções"
+            "insercoes_fmt": "Inserções",
+            "custo_fmt": "Custo Médio"
         })
         
         st.dataframe(tabela, width="stretch", hide_index=True) 
 
         # Display Gráfico (Mostra apenas a métrica do critério)
-        is_currency = (criterio == "Faturamento")
-        y_col = "faturamento" if is_currency else "insercoes"
-        y_label = "Faturamento (R$)" if is_currency else "Inserções (Qtd)"
+        is_currency = (criterio == "Faturamento" or criterio == "Menor Custo Unitário")
         
+        if criterio == "Faturamento":
+            y_col, y_label = "faturamento", "Faturamento (R$)"
+        elif criterio == "Inserções":
+            y_col, y_label = "insercoes", "Inserções (Qtd)"
+        else:
+            y_col, y_label = "custo_unitario", "Custo Unitário (R$)"
+        
+        # Cor padrão (Azul) para todos os gráficos
+        cor_grafico_final = cor_grafico
+
         fig = px.bar(
             top10_raw.head(10), 
             x="cliente", 
             y=y_col, 
-            color_discrete_sequence=[cor_grafico], 
+            color_discrete_sequence=[cor_grafico_final], 
             labels={"cliente": "Cliente", y_col: y_label}
         )
         
@@ -183,7 +225,7 @@ def render(df, mes_ini, mes_fim, show_labels, ultima_atualizacao=None):
         
         st.plotly_chart(fig, width="stretch") 
     else: 
-        st.info("Sem dados para essa seleção.")
+        st.info("Sem dados para essa seleção (ou valores zerados).")
 
     st.divider()
     
@@ -208,13 +250,14 @@ def render(df, mes_ini, mes_fim, show_labels, ultima_atualizacao=None):
         @st.dialog("Opções de Exportação - Top 10")
         def export_dialog():
             nome_arq = "Global" if emis_sel.startswith("Consolidado") else emis_sel
-            criterio_arq = "Fat" if criterio == "Faturamento" else "Ins"
+            criterio_arq = criterio.replace(" ", "_")
             
             # Prepara DF para exportação com nomes bonitos
             df_exp = top10_raw_export.rename(columns={
                 "cliente": "Cliente", 
                 "faturamento": "Faturamento",
-                "insercoes": "Inserções"
+                "insercoes": "Inserções",
+                "custo_unitario": "Custo Médio"
             }) if not top10_raw_export.empty else None
 
             all_options = {

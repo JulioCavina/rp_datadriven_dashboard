@@ -84,50 +84,65 @@ def render(df, mes_ini, mes_fim, show_labels, ultima_atualizacao=None):
     lista_perdas = sorted(list(cliA - cliB))
     lista_ganhos = sorted(list(cliB - cliA))
 
-    # Totais Gerais (Financeiro)
-    totalA = baseA["faturamento"].sum()
-    totalB = baseB["faturamento"].sum()
+    # Valores Perdidos (Saíram em A)
+    dados_perdas = baseA[baseA["cliente"].isin(lista_perdas)]
+    val_perdas = dados_perdas["faturamento"].sum()
+    ins_perdas = dados_perdas["insercoes"].sum()
     
-    # Totais Gerais (Volume)
-    totalInsA = baseA["insercoes"].sum()
-    totalInsB = baseB["insercoes"].sum()
+    # Valores Ganhos (Entraram em B)
+    dados_ganhos = baseB[baseB["cliente"].isin(lista_ganhos)]
+    val_ganhos = dados_ganhos["faturamento"].sum()
+    ins_ganhos = dados_ganhos["insercoes"].sum()
+
+    # Cálculo do Custo Unitário Médio (Yield)
+    # Evita divisão por zero
+    custo_medio_perdas = (val_perdas / ins_perdas) if ins_perdas > 0 else 0.0
+    custo_medio_ganhos = (val_ganhos / ins_ganhos) if ins_ganhos > 0 else 0.0
     
-    # Valores Perdidos/Ganhos (Financeiro)
-    val_perdas = baseA[baseA["cliente"].isin(lista_perdas)]["faturamento"].sum()
-    val_ganhos = baseB[baseB["cliente"].isin(lista_ganhos)]["faturamento"].sum()
+    # Deltas (Saldos)
+    saldo_financeiro = val_ganhos - val_perdas
+    saldo_clientes = len(lista_ganhos) - len(lista_perdas)
+    saldo_insercoes = ins_ganhos - ins_perdas
+    saldo_custo = custo_medio_ganhos - custo_medio_perdas
 
-    # Valores Perdidos/Ganhos (Inserções)
-    ins_perdas = baseA[baseA["cliente"].isin(lista_perdas)]["insercoes"].sum()
-    ins_ganhos = baseB[baseB["cliente"].isin(lista_ganhos)]["insercoes"].sum()
-
-    pct_perdas = (val_perdas / totalA * 100) if totalA > 0 else 0
-    pct_ganhos = (val_ganhos / totalB * 100) if totalB > 0 else 0
-
-    # ==================== DETALHAMENTO (PERDAS E GANHOS) ====================
-    c1, c2, c3, c4 = st.columns(4)
-    c1.metric("Clientes Perdidos", len(lista_perdas))
-    c2.metric(f"Valor Perdido ({ano_base})", brl(val_perdas))
-    c3.metric(f"Inserções Perdidas", format_int(ins_perdas))
-    c4.metric(f"% Impacto ({ano_base})", f"-{pct_perdas:.2f}%") 
+    # ==================== CARDS DE SALDO LÍQUIDO ====================
+    # Agora com 4 colunas para incluir o Custo Unitário
+    col_s1, col_s2, col_s3, col_s4 = st.columns(4)
     
-    st.markdown("<div style='height: 10px;'></div>", unsafe_allow_html=True)
+    col_s1.metric(
+        "Saldo Líquido (R$)", 
+        format_currency(saldo_financeiro), 
+        delta=f"Novos: {format_currency(val_ganhos)} | Perdidos: {format_currency(val_perdas)}",
+        delta_color="normal" 
+    )
+    col_s2.metric(
+        "Saldo de Clientes (Qtd)", 
+        f"{saldo_clientes:+}", 
+        delta=f"Novos: {len(lista_ganhos)} | Perdidos: {len(lista_perdas)}",
+        delta_color="normal"
+    )
+    col_s3.metric(
+        "Saldo Inserções (Qtd)",
+        f"{int(saldo_insercoes):+}",
+        delta=f"Novas: {int(ins_ganhos)} | Perdidas: {int(ins_perdas)}",
+        delta_color="normal"
+    )
+    col_s4.metric(
+        "Saldo Custo Médio (R$)",
+        f"{saldo_custo:+.2f}".replace(".", ","), # Ex: +15,50
+        delta=f"Novos: {brl(custo_medio_ganhos)} | Perdidos: {brl(custo_medio_perdas)}",
+        delta_color="normal" # Verde se Novos pagam mais (positivo), Vermelho se pagam menos
+    )
+    
+    st.divider()
 
-    c5, c6, c7, c8 = st.columns(4)
-    c5.metric("Clientes Novos", len(lista_ganhos))
-    c6.metric(f"Valor Ganho ({ano_comp})", brl(val_ganhos))
-    c7.metric(f"Inserções Ganhas", format_int(ins_ganhos))
-    c8.metric(f"% Impacto ({ano_comp})", f"+{pct_ganhos:.2f}%")
-
-    st.markdown("<br>", unsafe_allow_html=True)
-
-    # TABELAS LADO A LADO
+    # ==================== TABELAS LADO A LADO ====================
     colA, colB = st.columns(2)
     
     # Tabela Perdas
     with colA:
         st.subheader(f"1. Clientes Perdidos (Saíram de {ano_base})")
         if lista_perdas:
-            # Agrupa soma de Faturamento e Inserções
             df_perdas_raw = (baseA[baseA["cliente"].isin(lista_perdas)]
                              .groupby("cliente", as_index=False)
                              .agg(faturamento=("faturamento", "sum"), insercoes=("insercoes", "sum"))
@@ -135,7 +150,6 @@ def render(df, mes_ini, mes_fim, show_labels, ultima_atualizacao=None):
                              .reset_index(drop=True))
             
             if not df_perdas_raw.empty:
-                # Totalizador
                 total_row = pd.DataFrame([{
                     "cliente": "Totalizador", 
                     "faturamento": df_perdas_raw["faturamento"].sum(),
@@ -163,7 +177,6 @@ def render(df, mes_ini, mes_fim, show_labels, ultima_atualizacao=None):
     with colB:
         st.subheader(f"2. Clientes Novos (Entraram em {ano_comp})")
         if lista_ganhos:
-            # Agrupa soma de Faturamento e Inserções
             df_ganhos_raw = (baseB[baseB["cliente"].isin(lista_ganhos)]
                              .groupby("cliente", as_index=False)
                              .agg(faturamento=("faturamento", "sum"), insercoes=("insercoes", "sum"))
@@ -171,7 +184,6 @@ def render(df, mes_ini, mes_fim, show_labels, ultima_atualizacao=None):
                              .reset_index(drop=True))
             
             if not df_ganhos_raw.empty:
-                # Totalizador
                 total_row = pd.DataFrame([{
                     "cliente": "Totalizador", 
                     "faturamento": df_ganhos_raw["faturamento"].sum(),
@@ -197,24 +209,18 @@ def render(df, mes_ini, mes_fim, show_labels, ultima_atualizacao=None):
 
     st.divider()
 
-    # Função auxiliar para montar tabela de variação complexa
+    # Função auxiliar para montar tabela de variação
     def build_variation_table(groupby_col, label_col):
-        # Pivot de Faturamento
         piv_fat = base_periodo.groupby([groupby_col, "ano"])["faturamento"].sum().unstack(fill_value=0)
-        # Pivot de Inserções
         piv_ins = base_periodo.groupby([groupby_col, "ano"])["insercoes"].sum().unstack(fill_value=0)
         
-        # Garante colunas
         for ano in [ano_base, ano_comp]:
             if ano not in piv_fat.columns: piv_fat[ano] = 0.0
             if ano not in piv_ins.columns: piv_ins[ano] = 0.0
             
-        # Junta tudo
         df_var = pd.concat([piv_fat, piv_ins], axis=1)
-        # Renomeia colunas para facilitar acesso: [FatA, FatB, InsA, InsB]
         df_var.columns = [f"Fat_{ano_base}", f"Fat_{ano_comp}", f"Ins_{ano_base}", f"Ins_{ano_comp}"]
         
-        # Deltas
         df_var["Δ Fat"] = df_var[f"Fat_{ano_comp}"] - df_var[f"Fat_{ano_base}"]
         df_var["Δ%"] = np.where(df_var[f"Fat_{ano_base}"] > 0, (df_var["Δ Fat"] / df_var[f"Fat_{ano_base}"]) * 100, np.nan)
         df_var["Δ Ins"] = df_var[f"Ins_{ano_comp}"] - df_var[f"Ins_{ano_base}"]
@@ -230,7 +236,6 @@ def render(df, mes_ini, mes_fim, show_labels, ultima_atualizacao=None):
     var_cli_raw = build_variation_table("cliente", "Cliente")
 
     if not var_cli_raw.empty:
-        # Totalizador
         total_fat_a = var_cli_raw[f"Fat_{ano_base}"].sum()
         total_fat_b = var_cli_raw[f"Fat_{ano_comp}"].sum()
         total_ins_a = var_cli_raw[f"Ins_{ano_base}"].sum()
@@ -248,10 +253,7 @@ def render(df, mes_ini, mes_fim, show_labels, ultima_atualizacao=None):
         }])
         var_cli_raw = pd.concat([var_cli_raw, row_total], ignore_index=True)
     
-    # Display Variação
     var_cli_disp = var_cli_raw.copy()
-    
-    # Renomeia colunas para o display final (Mais amigável)
     col_map = {
         f"Fat_{ano_base}": f"R$ {ano_base}",
         f"Fat_{ano_comp}": f"R$ {ano_comp}",
@@ -333,11 +335,8 @@ def render(df, mes_ini, mes_fim, show_labels, ultima_atualizacao=None):
     if st.session_state.get("show_perdas_export", False):
         @st.dialog("Opções de Exportação - Perdas & Ganhos")
         def export_dialog():
-            # Prepara DFs para exportação (Renomeando colunas técnicas para nomes bonitos)
             df_p_exp = df_perdas_raw.rename(columns={"cliente": "Cliente", "faturamento": "Faturamento", "insercoes": "Inserções"}) if not df_perdas_raw.empty else None
             df_g_exp = df_ganhos_raw.rename(columns={"cliente": "Cliente", "faturamento": "Faturamento", "insercoes": "Inserções"}) if not df_ganhos_raw.empty else None
-            
-            # As tabelas de variação já foram renomeadas dentro da função build_variation_table
             df_vc_exp = var_cli_raw if not var_cli_raw.empty else None
             df_ve_exp = var_emis_raw if not var_emis_raw.empty else None
 

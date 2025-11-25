@@ -129,7 +129,23 @@ def aplicar_filtros(df, cookies):
             
             with sub_col6_A:
                 st.markdown("<label style='font-size: 1rem; color: #003366; font-weight: 600; margin-bottom: -10px;'>Rótulos de Dados</label>", unsafe_allow_html=True)
-                st.toggle("Rótulos de Dados", key="filtro_show_labels", help="Exibir/Ocultar rótulos", label_visibility="collapsed")
+                
+                # --- NOVA LÓGICA DO BOTÃO (SUBSTITUI O TOGGLE) ---
+                is_active = st.session_state["filtro_show_labels"]
+                
+                # Define estilo e texto com base no estado
+                if is_active:
+                    btn_type = "primary" # Azul (Ativo)
+                    btn_label = "Rótulos: Ativo"
+                else:
+                    btn_type = "secondary" # Branco (Inativo)
+                    btn_label = "Rótulos: Inativo"
+                
+                # Botão de alternância
+                if st.button(btn_label, type=btn_type, key="btn_toggle_labels", use_container_width=True):
+                    st.session_state["filtro_show_labels"] = not is_active
+                    st.rerun()
+                # -------------------------------------------------
             
             with sub_col6_B:
                 st.markdown("<label style='font-size: 1rem; color: #003366; font-weight: 600; margin-bottom: -10px;'>Ações</label>", unsafe_allow_html=True)
@@ -183,7 +199,6 @@ def aplicar_filtros(df, cookies):
         cookies["app_filters"] = json.dumps(current_filters)
         cookies.save()
     except Exception:
-        # CORREÇÃO: Ignora erro de chave duplicada do componente de cookies
         pass
 
     return df_filtrado, anos_sel, emis_sel, exec_sel, cli_sel, mes_ini, mes_fim, show_labels

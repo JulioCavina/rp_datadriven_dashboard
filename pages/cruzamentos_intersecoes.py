@@ -30,6 +30,7 @@ def render(df, mes_ini, mes_fim, show_labels, ultima_atualizacao=None):
     df_comp_raw = pd.DataFrame()
     top_shared_raw = pd.DataFrame()
     mat_raw = pd.DataFrame()
+    pivot_cost_display = pd.DataFrame() 
     fig_mat = go.Figure() 
 
     df = df.rename(columns={c: c.lower() for c in df.columns})
@@ -47,7 +48,7 @@ def render(df, mes_ini, mes_fim, show_labels, ultima_atualizacao=None):
         st.info("Sem dados para o período selecionado.")
         return
 
-    # Agrupamento Base (Adicionado Inserções)
+    # Agrupamento Base
     agg = base_periodo.groupby(["cliente", "emissora"], as_index=False).agg(
         faturamento=("faturamento", "sum"),
         insercoes=("insercoes", "sum")
@@ -56,25 +57,22 @@ def render(df, mes_ini, mes_fim, show_labels, ultima_atualizacao=None):
 
     # Pivôs para cálculos
     pres_pivot = agg.pivot_table(index="cliente", columns="emissora", values="presenca", fill_value=0)
-    val_pivot = agg.pivot_table(index="cliente", columns="emissora", values="faturamento", fill_value=0.0) 
-    ins_pivot = agg.pivot_table(index="cliente", columns="emissora", values="insercoes", fill_value=0.0)
+    # Garante que todas as emissoras do dataframe filtrado apareçam nas colunas
+    emissoras = sorted(agg["emissora"].unique())
     
     # Contagem de Emissoras por Cliente
     emis_count = pres_pivot.sum(axis=1)
     
-
     # ==================== CÁLCULOS EXCLUSIVOS VS COMPARTILHADOS ====================
     exclusivos_mask = emis_count == 1
     compartilhados_mask = emis_count >= 2
 
     excl_info, comp_info = [], []
-    emissoras = sorted(agg["emissora"].unique())
     fat_total_geral = 0.0 
 
     for emis in emissoras:
         # --- EXCLUSIVOS ---
         cli_excl = pres_pivot.loc[exclusivos_mask & (pres_pivot[emis] == 1)].index
-        # Filtra na base agregada
         dados_excl = agg[(agg["cliente"].isin(cli_excl)) & (agg["emissora"] == emis)]
         
         fat_excl = dados_excl["faturamento"].sum()
@@ -113,7 +111,6 @@ def render(df, mes_ini, mes_fim, show_labels, ultima_atualizacao=None):
     if not df_excl_raw.empty:
         df_excl_raw = df_excl_raw.sort_values("Faturamento Exclusivo", ascending=False).reset_index(drop=True)
         
-        # Totalizador
         total_row = {
             "Emissora": "Totalizador", 
             "Clientes Exclusivos": df_excl_raw["Clientes Exclusivos"].sum(), 
@@ -140,7 +137,6 @@ def render(df, mes_ini, mes_fim, show_labels, ultima_atualizacao=None):
     if not df_comp_raw.empty:
         df_comp_raw = df_comp_raw.sort_values("Faturamento Compartilhado", ascending=False).reset_index(drop=True)
         
-        # Totalizador
         total_row = {
             "Emissora": "Totalizador", 
             "Clientes Compartilhados": df_comp_raw["Clientes Compartilhados"].sum(), 
@@ -166,7 +162,6 @@ def render(df, mes_ini, mes_fim, show_labels, ultima_atualizacao=None):
     if compartilhados_mask.any():
         share_clients_idx = pres_pivot[compartilhados_mask].index
         
-        # Ordenação personalizada
         custom_order = ["Difusora", "Novabrasil", "Th+ Prime", "Thathi Tv"]
         order_map = {name.lower(): i for i, name in enumerate(custom_order)}
 
@@ -177,7 +172,6 @@ def render(df, mes_ini, mes_fim, show_labels, ultima_atualizacao=None):
 
         df_emis_list = pres_pivot.loc[share_clients_idx].apply(get_emissoras_str, axis=1)
         
-        # Agrupa Faturamento e Inserções
         top_shared_raw = (base_periodo[base_periodo["cliente"].isin(share_clients_idx)]
                           .groupby("cliente", as_index=False)
                           .agg(faturamento=("faturamento", "sum"), insercoes=("insercoes", "sum"))
@@ -233,7 +227,6 @@ def render(df, mes_ini, mes_fim, show_labels, ultima_atualizacao=None):
     if len(emis_list) < 2:
         st.info("Requer pelo menos 2 emissoras para cruzamento.")
     else:
-        # Botões - agora são 3 opções
         col1, col2, col3 = st.columns([1, 1, 1]) 
         
         btn_type_clientes = "primary" if metric == "Clientes" else "secondary"
@@ -257,7 +250,6 @@ def render(df, mes_ini, mes_fim, show_labels, ultima_atualizacao=None):
         z_text = None 
         text_colors_2d = [] 
 
-        # --- Lógica da Matriz ---
         if metric == "Clientes":
             for a, b in combinations(emis_list, 2):
                 comuns = ((pres_pivot[a] == 1) & (pres_pivot[b] == 1)).sum()
@@ -271,6 +263,7 @@ def render(df, mes_ini, mes_fim, show_labels, ultima_atualizacao=None):
             text_colors_2d = [['white' if v > max_val * 0.4 else 'black' for v in row] for row in z]
             
         elif metric == "Faturamento": 
+            val_pivot = agg.pivot_table(index="cliente", columns="emissora", values="faturamento", fill_value=0.0) 
             for a, b in combinations(emis_list, 2):
                 menor = np.minimum(val_pivot[a], val_pivot[b])
                 vlr = menor[menor > 0].sum()
@@ -283,9 +276,9 @@ def render(df, mes_ini, mes_fim, show_labels, ultima_atualizacao=None):
             max_val = np.nanmax(z) if z.size > 0 else 0
             text_colors_2d = [['white' if v > max_val * 0.4 else 'black' for v in row] for row in z]
             
-        else: # Inserções
+        else: 
+            ins_pivot = agg.pivot_table(index="cliente", columns="emissora", values="insercoes", fill_value=0.0)
             for a, b in combinations(emis_list, 2):
-                # Interseção de Inserções (Mínimo entre as duas)
                 menor = np.minimum(ins_pivot[a], ins_pivot[b])
                 vlr = menor[menor > 0].sum()
                 mat_raw.loc[a, b] = vlr
@@ -308,6 +301,45 @@ def render(df, mes_ini, mes_fim, show_labels, ultima_atualizacao=None):
         
     st.divider()
 
+    # ==================== 5. COMPARATIVO CUSTO UNITÁRIO (NOVO) ====================
+    st.subheader("5. Comparativo de Custo Unitário (Clientes Compartilhados)")
+    
+    if compartilhados_mask.any():
+        share_clients_idx = pres_pivot[compartilhados_mask].index
+        
+        df_cost = agg[agg["cliente"].isin(share_clients_idx)].copy()
+        
+        # --- CORREÇÃO AQUI: Se inserção=0, assume 1 (Valor cheio) ---
+        df_cost["custo_unit"] = np.where(
+            df_cost["insercoes"] > 0,
+            df_cost["faturamento"] / df_cost["insercoes"],
+            df_cost["faturamento"] # Assume 1 inserção se não houver dados
+        )
+        
+        pivot_cost = df_cost.pivot_table(
+            index="cliente", 
+            columns="emissora", 
+            values="custo_unit"
+        )
+        
+        pivot_cost = pivot_cost.reindex(columns=emissoras)
+        
+        client_ranking = base_periodo.groupby("cliente")["faturamento"].sum()
+        pivot_cost["_sort_val"] = pivot_cost.index.map(client_ranking)
+        pivot_cost = pivot_cost.sort_values("_sort_val", ascending=False).drop(columns="_sort_val")
+        
+        pivot_cost_display = pivot_cost.copy()
+        for col in pivot_cost_display.columns:
+            pivot_cost_display[col] = pivot_cost_display[col].apply(lambda x: brl(x) if pd.notna(x) else "-")
+            
+        pivot_cost_display.index.name = "Cliente"
+        st.dataframe(pivot_cost_display, width="stretch")
+        
+    else:
+        st.info("Não há dados suficientes para comparação de custos (sem clientes compartilhados).")
+
+    st.divider()
+
     # ==================== EXPORTAÇÃO ====================
     def get_filter_string():
         f = st.session_state 
@@ -328,13 +360,13 @@ def render(df, mes_ini, mes_fim, show_labels, ultima_atualizacao=None):
     if st.session_state.get("show_cruzamentos_export", False):
         @st.dialog("Opções de Exportação - Cruzamentos")
         def export_dialog():
-            # Prepara DFs para exportação com nomes bonitos
             table_options = {
                 "1. Clientes Exclusivos": {'df': df_excl_raw},
                 "2. Clientes Compartilhados": {'df': df_comp_raw},
                 "3. Top Compartilhados": {'df': top_shared_raw},
                 "4. Matriz (Dados)": {'df': mat_raw.reset_index().rename(columns={'index':'Emissora'})},
-                "4. Matriz (Gráfico)": {'fig': fig_mat} 
+                "4. Matriz (Gráfico)": {'fig': fig_mat},
+                "5. Comparativo Custo Unitário": {'df': pivot_cost_display.reset_index()} 
             }
             
             available_options = [name for name, data in table_options.items() if (data.get('df') is not None and not data['df'].empty) or (data.get('fig') is not None and data['fig'].data)]

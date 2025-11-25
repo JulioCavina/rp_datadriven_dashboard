@@ -197,18 +197,29 @@ label, .stMarkdown h3, .stMarkdown h4 {
     font-weight: 600 !important;
 }
 
-/* ==================== RODAPÉ CENTRALIZADO ==================== */
+/* ==================== FOOTER ==================== */
 .footer-container {
+    position: fixed;
+    bottom: 0;
+    left: 0;
     width: 100%;
+    background-color: #f1f1f1;
     text-align: center;
-    margin-top: 3rem;
-    padding-top: 1rem;
-    border-top: 1px solid #eee;
+    padding: 8px 0; /* Reduzi o padding */
+    font-size: 0.8rem;
+    color: #555;
+    border-top: 1px solid #ddd;
+    z-index: 999;
 }
 
 .footer-text {
-    font-size: 0.75rem;
-    color: #666;
     margin: 0;
-    padding: 2px;
+    padding: 0;
+    line-height: 1.4;
+}
+
+.footer-date {
+    font-weight: 600;
+    color: #003366;
+    margin-bottom: 4px;
 }
