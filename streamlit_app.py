@@ -24,7 +24,7 @@ from utils.loaders import load_main_base
 from utils.filters import aplicar_filtros
 from utils.format import normalize_dataframe
 
-# Importação das páginas (Atualizado com cruzamentos_intersecoes)
+# Importação das páginas
 from pages import inicio, visao_geral, clientes_faturamento, perdas_ganhos, cruzamentos_intersecoes, top10, crowley
 
 # ==================== CONFIGURAÇÕES GERAIS ====================
@@ -139,13 +139,11 @@ if os.path.exists(logo_path):
     st.sidebar.image(logo, width=160) 
 
 # ==================== CARREGAMENTO DE DADOS ====================
-# Botão Voltar ao Menu (Invisível na Home)
 query_params = st.query_params
 nav_id = query_params.get("nav", ["0"])[0]
 pages_keys = ["Início", "Visão Geral", "Clientes & Faturamento", "Perdas & Ganhos", "Cruzamentos & Interseções", "Top 10", "Crowley ABC"]
 
 try:
-    # Garante que nav_id é int, caso contrário assume 0
     idx_ativa = int(nav_id)
     if idx_ativa < 0 or idx_ativa >= len(pages_keys):
         idx_ativa = 0
@@ -154,7 +152,6 @@ except ValueError:
 
 pagina_ativa = pages_keys[idx_ativa]
 
-# Renderiza o botão de voltar apenas se NÃO for a página Início
 if pagina_ativa != "Início":
     st.markdown("""
         <a href="?nav=0" target="_self" class="nav-back-link">
@@ -162,7 +159,6 @@ if pagina_ativa != "Início":
         </a>
     """, unsafe_allow_html=True)
 
-# Título e Legenda Padrão (Abaixo do botão de voltar)
 if pagina_ativa == "Início":
     st.title("Dashboard Vendas Ribeirão Preto")
     st.caption("Menu lateral para navegar • Filtros no topo • Exportação em Excel")
@@ -200,7 +196,6 @@ if df is None or df.empty:
 
 
 # ==================== MENU LATERAL ====================
-# Atualizado com o novo módulo de cruzamentos
 pages = {
     "Início": inicio,
     "Visão Geral": visao_geral,
@@ -218,7 +213,7 @@ page_display = {
     "Perdas & Ganhos": "Perdas & Ganhos",
     "Cruzamentos & Interseções": "Cruzamentos & Interseções",
     "Top 10": "Top 10",
-    "Crowley ABC": "Relatório ABC", # Ajustei o nome display para ficar mais bonito
+    "Crowley ABC": "Relatório ABC",
 }
 
 st.sidebar.markdown('<p style="font-size:0.85rem; font-weight:600; margin-bottom: 0.5rem; margin-left: 10px;">Selecione a página:</p>', unsafe_allow_html=True)
@@ -234,7 +229,9 @@ for idx, page_name in enumerate(pages_keys):
 st.sidebar.markdown(f'<div class="sidebar-nav-container">{"".join(html_menu)}</div>', unsafe_allow_html=True)
 st.sidebar.divider()
 
-# ==================== POP-UP DE BOAS-VINDAS ====================
+# ==================== POP-UPS (DIÁLOGOS SEQUENCIAIS) ====================
+
+# --- 1. Modal de Boas-vindas ---
 @st.dialog("Banner de Boas-vindas", width="medium")
 def modal_boas_vindas():
     st.markdown("""
@@ -267,25 +264,61 @@ def modal_boas_vindas():
         cookies.save()
         st.rerun()
 
-should_show_popup = False
-last_view_str = cookies.get("last_popup_view")
-if not last_view_str:
-    should_show_popup = True
-else:
-    try:
-        last_view = datetime.fromisoformat(last_view_str)
-        if datetime.now() - last_view > timedelta(hours=24):
-            should_show_popup = True
-    except ValueError:
-        should_show_popup = True
+# --- 2. Modal de Aviso de Dados (Novo) ---
+@st.dialog("Aviso Importante: Dados", width="small")
+def modal_aviso_dados():
+    st.warning("⚠️ Atenção: Dados em Homologação")
+    st.markdown("""
+        Os dados exibidos neste ambiente são **temporários** e estão sendo utilizados apenas para fins de **testes e validação** da plataforma.
+        
+        Por favor, **não considere os valores como oficiais** ou definitivos para tomadas de decisão neste momento.
+    """)
+    st.markdown("<div style='height: 15px;'></div>", unsafe_allow_html=True)
+    
+    if st.button("Estou ciente", type="primary"):
+        cookies["last_disclaimer_view"] = datetime.now().isoformat()
+        cookies.save()
+        st.rerun()
 
-if st.session_state.authenticated and should_show_popup:
-    modal_boas_vindas()
+# --- Lógica de Exibição Sequencial ---
+if st.session_state.authenticated:
+    
+    # Verificação 1: Boas-vindas
+    show_welcome = False
+    last_view_str = cookies.get("last_popup_view")
+    if not last_view_str:
+        show_welcome = True
+    else:
+        try:
+            last_view = datetime.fromisoformat(last_view_str)
+            if datetime.now() - last_view > timedelta(hours=24):
+                show_welcome = True
+        except ValueError:
+            show_welcome = True
+
+    # Verificação 2: Aviso de Dados
+    show_disclaimer = False
+    last_disc_str = cookies.get("last_disclaimer_view")
+    if not last_disc_str:
+        show_disclaimer = True
+    else:
+        try:
+            last_disc = datetime.fromisoformat(last_disc_str)
+            if datetime.now() - last_disc > timedelta(hours=24):
+                show_disclaimer = True
+        except ValueError:
+            show_disclaimer = True
+
+    # Execução (Prioridade para Boas-vindas -> depois Aviso)
+    if show_welcome:
+        modal_boas_vindas()
+    elif show_disclaimer:
+        modal_aviso_dados()
 
 
 # ==================== ROTEAMENTO ====================
 if pagina_ativa == "Início":
-    pages[pagina_ativa].render(df) # Início não recebe date
+    pages[pagina_ativa].render(df) 
 else:
     df_filtrado, anos_sel, emis_sel, exec_sel, cli_sel, mes_ini, mes_fim, show_labels = aplicar_filtros(df, cookies)
 
@@ -293,11 +326,9 @@ else:
         st.warning("⚠️ Nenhum dado encontrado com os filtros aplicados.")
         st.stop()
     
-    # CORREÇÃO APLICADA AQUI:
-    # Todas as páginas (exceto Início) agora recebem a assinatura completa, inclusive o Crowley ABC.
     pages[pagina_ativa].render(df_filtrado, mes_ini, mes_fim, show_labels, ultima_atualizacao)
 
-# ==================== RODAPÉ GLOBAL CENTRALIZADO (SEM DATA) ====================
+# ==================== RODAPÉ GLOBAL CENTRALIZADO ====================
 footer_html = """
 <div class="footer-container">
     <p class="footer-text">Powered by Python | Interface Streamlit | Data Driven Novabrasil</p>
