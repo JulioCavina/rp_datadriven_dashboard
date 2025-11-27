@@ -2,9 +2,12 @@
 import streamlit as st
 import pandas as pd
 import json 
+from datetime import datetime 
 
 def aplicar_filtros(df, cookies):
-    """Aplica filtros interativos no corpo principal da página, com estado persistente."""
+    """
+    Aplica filtros interativos no TOPO da página (Main Area).
+    """
 
     # ==================== NORMALIZAÇÃO ====================
     df.columns = df.columns.str.strip().str.lower()
@@ -59,8 +62,13 @@ def aplicar_filtros(df, cookies):
 
     # ==================== LÓGICA DE PERSISTÊNCIA (SESSION STATE) ====================
     
-    default_ini = 2024 if 2024 in anos_disponiveis else (anos_disponiveis[0] if anos_disponiveis else 2024)
-    default_fim = 2025 if 2025 in anos_disponiveis else (anos_disponiveis[-1] if anos_disponiveis else 2025)
+    # LÓGICA ATUALIZADA: Pega o Menor e Maior ano da base automaticamente
+    if anos_disponiveis:
+        default_ini = min(anos_disponiveis)
+        default_fim = max(anos_disponiveis)
+    else:
+        default_ini = 2024
+        default_fim = 2025
     
     if "filtro_ano_ini" not in st.session_state:
         st.session_state["filtro_ano_ini"] = default_ini
@@ -82,7 +90,7 @@ def aplicar_filtros(df, cookies):
     if "filtro_show_labels" not in st.session_state:
         st.session_state["filtro_show_labels"] = True 
 
-    # --- DEFINIÇÃO DO CALLBACK ---
+    # --- CALLBACKS ---
     def reset_filtros_callback():
         st.session_state["filtro_ano_ini"] = default_ini
         st.session_state["filtro_ano_fim"] = default_fim
@@ -95,64 +103,67 @@ def aplicar_filtros(df, cookies):
         if cookies.get("app_filters"):
             del cookies["app_filters"] 
             cookies.save()
-        
-    # ==================== WIDGETS DE FILTRO ====================
-    with st.container():
-        st.markdown("<h3 style='color:#002b5c;'>Filtros Globais</h3>", unsafe_allow_html=True)
 
-        col1, col2, col3 = st.columns(3)
+    def set_ytd_callback():
+        hoje = datetime.now()
+        mes_atual = hoje.month
+        meses_ytd_num = list(range(1, mes_atual + 1))
+        meses_ytd_nomes = [mes_map.get(m) for m in meses_ytd_num if m in mes_map]
+        st.session_state["filtro_meses_lista"] = meses_ytd_nomes
         
-        with col1:
-            st.markdown("<label style='font-size: 1rem; color: #003366; font-weight: 600; margin-bottom: -10px;'>Período (Ano):</label>", unsafe_allow_html=True)
-            sub_col1, sub_col2 = st.columns(2)
-            with sub_col1:
-                st.selectbox("De:", anos_disponiveis, key="filtro_ano_ini")
-            with sub_col2:
-                st.selectbox("Até:", anos_disponiveis, key="filtro_ano_fim")
+    # ==================== WIDGETS NO TOPO (EXPANDER WIDE) ====================
+    
+    # ATUALIZAÇÃO: Título sem emoji
+    with st.expander("Filtros Globais (Clique para expandir)", expanded=False):
         
-        with col2:
-            st.multiselect("Emissora(s):", emisoras, key="filtro_emis")
+        # --- LINHA 1: PERÍODO E CATEGORIAS MACRO ---
+        c1, c2, c3, c4 = st.columns([1, 1, 2, 2])
+        
+        with c1:
+            st.selectbox("Ano De:", anos_disponiveis, key="filtro_ano_ini")
+        with c2:
+            st.selectbox("Ano Até:", anos_disponiveis, key="filtro_ano_fim")
+        with c3:
+            st.multiselect("Emissoras:", emisoras, key="filtro_emis")
+        with c4:
+            st.multiselect("Executivos:", execs, key="filtro_execs")
 
-        with col3:
-            st.multiselect("Executivo(s):", execs, key="filtro_execs")
+        # --- LINHA 2: MESES E CLIENTES ---
+        c5, c6 = st.columns([2, 4])
+        
+        with c5:
+            st.multiselect("Meses:", meses_disponiveis_nomes, key="filtro_meses_lista")
+        with c6:
+            st.multiselect("Clientes:", clientes, key="filtro_clientes", help="Digite para buscar clientes específicos")
 
-        col4, col5, col6 = st.columns(3)
+        st.markdown("---")
+
+        # --- LINHA 3: AÇÕES ---
+        st.markdown("**Controles & Ações**")
         
-        with col4:
-            st.multiselect("Mês(es):", meses_disponiveis_nomes, key="filtro_meses_lista")
+        c7, c8, c9, c10 = st.columns([1.5, 3, 0.8, 0.8])
         
-        with col5:
-            st.multiselect("Cliente(s):", clientes, key="filtro_clientes")
-        
-        with col6:
-            sub_col6_A, sub_col6_B = st.columns(2)
+        with c7:
+            is_active = st.session_state["filtro_show_labels"]
+            if is_active:
+                btn_type = "primary"
+                btn_text = "Rótulos: Ativo"
+            else:
+                btn_type = "secondary"
+                btn_text = "Rótulos: Inativo"
             
-            with sub_col6_A:
-                st.markdown("<label style='font-size: 1rem; color: #003366; font-weight: 600; margin-bottom: -10px;'>Rótulos de Dados</label>", unsafe_allow_html=True)
-                
-                # --- NOVA LÓGICA DO BOTÃO (SUBSTITUI O TOGGLE) ---
-                is_active = st.session_state["filtro_show_labels"]
-                
-                # Define estilo e texto com base no estado
-                if is_active:
-                    btn_type = "primary" # Azul (Ativo)
-                    btn_label = "Rótulos: Ativo"
-                else:
-                    btn_type = "secondary" # Branco (Inativo)
-                    btn_label = "Rótulos: Inativo"
-                
-                # Botão de alternância
-                if st.button(btn_label, type=btn_type, key="btn_toggle_labels", use_container_width=True):
-                    st.session_state["filtro_show_labels"] = not is_active
-                    st.rerun()
-                # -------------------------------------------------
-            
-            with sub_col6_B:
-                st.markdown("<label style='font-size: 1rem; color: #003366; font-weight: 600; margin-bottom: -10px;'>Ações</label>", unsafe_allow_html=True)
-                st.button("Limpar Filtros", type="secondary", width='stretch', on_click=reset_filtros_callback)
+            if st.button(btn_text, type=btn_type, key="btn_toggle_labels", use_container_width=True):
+                st.session_state["filtro_show_labels"] = not is_active
+                st.rerun()
+
+        with c9:
+            st.button("YTD", type="secondary", help="Selecionar de Jan até Hoje", use_container_width=True, on_click=set_ytd_callback)
+        
+        with c10:
+            st.button("Limpar", type="secondary", help="Resetar todos os filtros", use_container_width=True, on_click=reset_filtros_callback)
 
 
-    # ==================== APLICA FILTROS ====================
+    # ==================== APLICA FILTROS (BACKEND) ====================
     ano_ini_sel = st.session_state["filtro_ano_ini"]
     ano_fim_sel = st.session_state["filtro_ano_fim"]
     
@@ -172,7 +183,6 @@ def aplicar_filtros(df, cookies):
     
     show_labels = st.session_state["filtro_show_labels"]
     
-    
     df_filtrado = df[
         (df["ano"].between(ano_1, ano_2)) &
         (df["emissora"].isin(emis_sel)) &
@@ -182,10 +192,8 @@ def aplicar_filtros(df, cookies):
 
     if cli_sel:
         df_filtrado = df_filtrado[df_filtrado["cliente"].isin(cli_sel)]
-
-    st.divider()
     
-    # Salva os filtros no Cookie
+    # Salva os filtros no Cookie (silencioso)
     try:
         current_filters = {
             "filtro_ano_ini": int(st.session_state["filtro_ano_ini"]),

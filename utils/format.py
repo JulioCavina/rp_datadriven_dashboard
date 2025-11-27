@@ -56,15 +56,15 @@ def normalize_text(texto):
 
 def consolidate_executives(name):
     """
-    Padroniza nomes de executivos e agrupa variações.
+    Padroniza nomes de executivos e filtra Vendas Externas.
     """
     if not isinstance(name, str): return name
     name_upper = name.upper()
     
-    # REMOVIDO: O filtro que excluía "VENDA EXTERNA" foi apagado.
-    # Agora eles passarão normalmente.
+    # REGRA ATUALIZADA: Vendas Externas são removidas e viram N/A
+    if "VENDA EXTERNA" in name_upper: return None 
 
-    # Regras de Aglomeração (Padronização de nomes repetidos)
+    # Regras de Aglomeração
     if "EDUARDO" in name_upper: return "Eduardo Notomi"
     if "JULIA" in name_upper: return "Julia Bergo"
     if "OLGA" in name_upper: return "Olga Luiza"
@@ -98,10 +98,10 @@ def normalize_dataframe(df_raw: pd.DataFrame) -> pd.DataFrame:
     for col in ["Emissora", "Cliente", "Executivo"]:
         df[col] = df[col].apply(normalize_text)
 
-    # 4. Consolidação de Executivos (Aglomeração sem filtro de exclusão)
+    # 4. Consolidação de Executivos (Aglomeração e Filtro)
     df["Executivo"] = df["Executivo"].apply(consolidate_executives)
     
-    # Preenche vazios reais com N/A (Vendas Externas NÃO cairão aqui pois têm nome)
+    # Substitui vazios e None (incluindo as Vendas Externas removidas) por "N/A"
     df["Executivo"] = df["Executivo"].replace(["", "nan", "None"], np.nan).fillna("N/A")
 
     # 5. Detecção e Conversão de Datas
@@ -139,7 +139,6 @@ def normalize_dataframe(df_raw: pd.DataFrame) -> pd.DataFrame:
     # 8. Tratamento de Inserções e Custo Unitário
     if "Insercoes" in df.columns:
         df["Insercoes"] = pd.to_numeric(df["Insercoes"], errors='coerce')
-        # Regra: Para cálculo de custo, se vazio assume 1.
         insercoes_para_custo = df["Insercoes"].fillna(1).replace(0, 1)
         df["Custo_Unitario"] = df["Faturamento"] / insercoes_para_custo
     else:

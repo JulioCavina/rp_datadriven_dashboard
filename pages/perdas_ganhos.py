@@ -34,6 +34,43 @@ def format_int(val):
     if pd.isna(val) or val == 0: return "-"
     return f"{int(val):,}".replace(",", ".")
 
+def format_percent_col(val):
+    """Converte valor numérico para string formatada ou hífen se nulo."""
+    if pd.isna(val): return "-"
+    return f"{val:+.2f}%"
+
+# ==================== FUNÇÃO AUXILIAR DE ESTILO ====================
+def display_styled_table(df, format_dict=None, color_cols=None):
+    """
+    Renderiza o dataframe aplicando estilo de destaque (Totalizador) na última linha.
+    """
+    if df.empty:
+        return
+
+    # Função de estilo para a linha 'Totalizador' (assumindo que é sempre a última)
+    def highlight_total_row(row):
+        if row.name == (len(df) - 1): # Última linha
+            return ['background-color: #e6f3ff; font-weight: bold; color: #003366'] * len(row)
+        return [''] * len(row)
+
+    styler = df.style.apply(highlight_total_row, axis=1)
+
+    # Aplica cores condicionais (verde/vermelho) se houver colunas de variação
+    if color_cols:
+        styler = styler.map(color_delta, subset=[c for c in color_cols if c in df.columns])
+    
+    # Aplica formatação de dicionário se fornecido
+    if format_dict:
+        styler = styler.format(format_dict)
+
+    st.dataframe(
+        styler, 
+        width="stretch", 
+        hide_index=True, 
+        column_config={"#": st.column_config.TextColumn("#", width="small")}
+    )
+
+# ==================== RENDERIZAÇÃO DA PÁGINA ====================
 def render(df, mes_ini, mes_fim, show_labels, ultima_atualizacao=None):
     # Inicialização de DFs para exportação
     df_perdas_raw = pd.DataFrame()
@@ -95,7 +132,6 @@ def render(df, mes_ini, mes_fim, show_labels, ultima_atualizacao=None):
     ins_ganhos = dados_ganhos["insercoes"].sum()
 
     # Cálculo do Custo Unitário Médio (Yield)
-    # Evita divisão por zero
     custo_medio_perdas = (val_perdas / ins_perdas) if ins_perdas > 0 else 0.0
     custo_medio_ganhos = (val_ganhos / ins_ganhos) if ins_ganhos > 0 else 0.0
     
@@ -106,7 +142,6 @@ def render(df, mes_ini, mes_fim, show_labels, ultima_atualizacao=None):
     saldo_custo = custo_medio_ganhos - custo_medio_perdas
 
     # ==================== CARDS DE SALDO LÍQUIDO ====================
-    # Agora com 4 colunas para incluir o Custo Unitário
     col_s1, col_s2, col_s3, col_s4 = st.columns(4)
     
     col_s1.metric(
@@ -128,10 +163,10 @@ def render(df, mes_ini, mes_fim, show_labels, ultima_atualizacao=None):
         delta_color="normal"
     )
     col_s4.metric(
-        "Saldo Custo Médio (R$)",
-        f"{saldo_custo:+.2f}".replace(".", ","), # Ex: +15,50
+        "Custo Médio Unitário (Saldo)",
+        f"{saldo_custo:+.2f}".replace(".", ","), 
         delta=f"Novos: {brl(custo_medio_ganhos)} | Perdidos: {brl(custo_medio_perdas)}",
-        delta_color="normal" # Verde se Novos pagam mais (positivo), Vermelho se pagam menos
+        delta_color="normal"
     )
     
     st.divider()
@@ -169,7 +204,9 @@ def render(df, mes_ini, mes_fim, show_labels, ultima_atualizacao=None):
             t_display["Faturamento"] = t_display["Faturamento"].apply(brl)
             t_display["Inserções"] = t_display["Inserções"].apply(format_int)
             
-            st.dataframe(t_display, width="stretch", hide_index=True, column_config={"#": None})
+            # Chama função de estilo
+            display_styled_table(t_display)
+
         else: 
             st.success("Nenhum cliente perdido neste período!")
 
@@ -203,7 +240,9 @@ def render(df, mes_ini, mes_fim, show_labels, ultima_atualizacao=None):
             t_display["Faturamento"] = t_display["Faturamento"].apply(brl)
             t_display["Inserções"] = t_display["Inserções"].apply(format_int)
             
-            st.dataframe(t_display, width="stretch", hide_index=True, column_config={"#": None})
+            # Chama função de estilo
+            display_styled_table(t_display)
+
         else: 
             st.info("Nenhum cliente novo neste período.")
 
@@ -261,20 +300,20 @@ def render(df, mes_ini, mes_fim, show_labels, ultima_atualizacao=None):
         f"Ins_{ano_comp}": f"Ins. {ano_comp}",
     }
     var_cli_disp = var_cli_disp.rename(columns=col_map)
-    
-    st.dataframe(
-        var_cli_disp.style.map(color_delta, subset=["Δ Fat", "Δ%", "Δ Ins"])
-        .format({
+    var_cli_disp["Δ%"] = var_cli_disp["Δ%"].apply(format_percent_col)
+
+    # Chama função de estilo
+    display_styled_table(
+        var_cli_disp, 
+        format_dict={
             f"R$ {ano_base}": brl, 
             f"R$ {ano_comp}": brl, 
             "Δ Fat": brl, 
-            "Δ%": lambda x: "—" if pd.isna(x) else f"{x:+.2f}%",
             f"Ins. {ano_base}": format_int,
             f"Ins. {ano_comp}": format_int,
             "Δ Ins": format_int
-        }, na_rep="—"), 
-        width="stretch", 
-        hide_index=True
+        },
+        color_cols=["Δ Fat", "Δ%", "Δ Ins"]
     )
 
     st.markdown("<br>", unsafe_allow_html=True)
@@ -303,20 +342,20 @@ def render(df, mes_ini, mes_fim, show_labels, ultima_atualizacao=None):
         var_emis_raw = pd.concat([var_emis_raw, row_total_e], ignore_index=True)
         
     var_emis_disp = var_emis_raw.copy().rename(columns=col_map)
-    
-    st.dataframe(
-        var_emis_disp.style.map(color_delta, subset=["Δ Fat", "Δ%", "Δ Ins"])
-        .format({
+    var_emis_disp["Δ%"] = var_emis_disp["Δ%"].apply(format_percent_col)
+
+    # Chama função de estilo
+    display_styled_table(
+        var_emis_disp,
+        format_dict={
             f"R$ {ano_base}": brl, 
             f"R$ {ano_comp}": brl, 
             "Δ Fat": brl, 
-            "Δ%": lambda x: "—" if pd.isna(x) else f"{x:+.2f}%",
             f"Ins. {ano_base}": format_int,
             f"Ins. {ano_comp}": format_int,
             "Δ Ins": format_int
-        }, na_rep="—"), 
-        width="stretch", 
-        hide_index=True
+        },
+        color_cols=["Δ Fat", "Δ%", "Δ Ins"]
     )
     
     st.divider()

@@ -7,20 +7,16 @@ from utils.format import brl, PALETTE
 from utils.loaders import load_main_base
 from utils.export import create_zip_package 
 
+# ==================== FUNÇÕES DE FORMATAÇÃO ====================
 def color_delta(val):
-    """
-    Colore valores. Aceita tanto float quanto strings formatadas (ex: '+15.20%').
-    """
-    if pd.isna(val) or val == "" or val == "-": 
-        return ""
-    
+    """Colore valores positivos de verde e negativos de vermelho."""
+    if pd.isna(val) or val == "" or val == "-": return ""
     try:
         if isinstance(val, (int, float)):
             v = float(val)
         else:
             clean_val = str(val).replace("%", "").replace("+", "").replace(",", ".")
             v = float(clean_val)
-
         if v > 0: return "color: #16a34a; font-weight: 600;" 
         if v < 0: return "color: #dc2626; font-weight: 600;" 
     except (ValueError, TypeError): 
@@ -28,105 +24,170 @@ def color_delta(val):
     return ""
 
 def format_percent_col(val):
-    """Converte valor numérico para string formatada ou hífen se nulo."""
     if pd.isna(val): return "-"
     return f"{val:+.2f}%"
 
 def format_int(val):
-    """Formata inteiros com separador de milhar, retornando '-' se 0 ou nulo."""
+    if isinstance(val, str): return val
     if pd.isna(val) or val == 0: return "-"
-    return f"{int(val):,}".replace(",", ".")
+    try:
+        return f"{int(val):,}".replace(",", ".")
+    except (ValueError, TypeError):
+        return str(val)
 
+# ==================== FUNÇÃO AUXILIAR DE EXIBIÇÃO (UNIFICADA) ====================
+def display_combined_table(df_main, df_total, format_dict=None, color_cols=None):
+    """
+    Concatena df_main e df_total em um único DataFrame, aplica a estilização
+    na última linha (totalizador) e renderiza uma única tabela.
+    """
+    
+    # 1. Concatenação (União das tabelas)
+    if not df_total.empty:
+        # Garante que as colunas estejam alinhadas
+        df_combined = pd.concat([df_main, df_total], ignore_index=True)
+    else:
+        df_combined = df_main.copy()
+
+    # 2. Definição da função de estilo para a linha de Total
+    def highlight_total_row(row):
+        # Se df_total existe e estamos na última linha do dataframe combinado
+        if not df_total.empty and row.name == (len(df_combined) - 1):
+            return ['background-color: #e6f3ff; font-weight: bold; color: #003366'] * len(row)
+        return [''] * len(row)
+
+    # 3. Aplicação dos estilos
+    # Primeiro aplicamos o destaque da linha total
+    styler = df_combined.style.apply(highlight_total_row, axis=1)
+
+    # Depois aplicamos as cores condicionais (verde/vermelho) nas colunas de variação
+    if color_cols:
+        styler = styler.map(color_delta, subset=[c for c in color_cols if c in df_combined.columns])
+
+    # Se houver formatação numérica específica (embora a maioria já venha formatada como string)
+    if format_dict:
+        styler = styler.format(format_dict)
+
+    # 4. Renderização
+    st.dataframe(
+        styler,
+        hide_index=True, 
+        width="stretch", 
+        column_config={"#": st.column_config.TextColumn("#", width="small")}
+    )
+
+    # Retorna o DF combinado para uso na exportação
+    return df_combined
+
+
+# ==================== RENDERIZAÇÃO DA PÁGINA ====================
 def render(df, mes_ini, mes_fim, show_labels, ultima_atualizacao=None):
-    # Título Centralizado
     st.markdown("<h2 style='text-align: center; color: #003366;'>Clientes & Faturamento</h2>", unsafe_allow_html=True)
     st.markdown("<div style='margin-bottom: 20px;'></div>", unsafe_allow_html=True)
 
     # Normalização
     df = df.rename(columns={c: c.lower() for c in df.columns})
-    
-    # Garante colunas essenciais
     if "faturamento" not in df.columns:
         st.error("Coluna 'Faturamento' ausente na base.")
         return
     if "insercoes" not in df.columns:
         df["insercoes"] = 0.0
 
-    # Definição dos Anos
+    # Anos
     anos = sorted(df["ano"].dropna().unique())
-    if not anos:
-        st.info("Sem anos válidos.")
-        return
-    if len(anos) >= 2:
-        ano_base, ano_comp = anos[-2], anos[-1]
-    else:
-        ano_base = ano_comp = anos[-1]
+    if not anos: st.info("Sem anos válidos."); return
+    if len(anos) >= 2: ano_base, ano_comp = anos[-2], anos[-1]
+    else: ano_base = ano_comp = anos[-1]
 
     base_periodo = df[df["mes"].between(mes_ini, mes_fim)]
 
-    # Helper para calcular métricas extras (Inserções e Custo Unitário) e mesclar
-    def enrich_with_metrics(df_main, group_col):
-        # Agrupa base_periodo para pegar totais
-        agg = base_periodo.groupby(group_col).agg(
-            Total_Fat=("faturamento", "sum"),
-            Total_Ins=("insercoes", "sum")
-        ).reset_index()
+    # Helper de métricas
+    def enrich_with_metrics_split(df_main, group_col):
+        piv_ins = base_periodo.groupby([group_col, "ano"])["insercoes"].sum().unstack(fill_value=0)
+        piv_fat = base_periodo.groupby([group_col, "ano"])["faturamento"].sum().unstack(fill_value=0)
         
-        # Cálculo do Custo Unitário (Evita divisão por zero)
-        agg["Custo Unit."] = np.where(
-            agg["Total_Ins"] > 0, 
-            agg["Total_Fat"] / agg["Total_Ins"], 
-            np.nan # Se não tem inserção, custo unitário não se aplica (ou poderia ser o valor cheio, mas visualmente '-' é melhor)
-        )
+        for ano in [ano_base, ano_comp]:
+            if ano not in piv_ins.columns: piv_ins[ano] = 0.0
+            if ano not in piv_fat.columns: piv_fat[ano] = 0.0
+            
+        custo_base = np.where(piv_ins[ano_base] > 0, piv_fat[ano_base] / piv_ins[ano_base], np.nan)
+        custo_comp = np.where(piv_ins[ano_comp] > 0, piv_fat[ano_comp] / piv_ins[ano_comp], np.nan)
         
-        # Merge com a tabela principal (que já tem os anos e deltas)
-        df_merged = pd.merge(df_main, agg[[group_col, "Total_Ins", "Custo Unit."]], on=group_col, how="left")
+        piv_fat = piv_fat.reset_index()
+        piv_ins = piv_ins.reset_index()
+
+        df_metrics = pd.DataFrame({
+            group_col: piv_fat[group_col], 
+            f"Ins_{ano_base}": piv_ins[ano_base].values,
+            f"Ins_{ano_comp}": piv_ins[ano_comp].values,
+            f"Custo_{ano_base}": custo_base,
+            f"Custo_{ano_comp}": custo_comp
+        })
         
-        # Preenche vazios
-        df_merged["Total_Ins"] = df_merged["Total_Ins"].fillna(0)
-        
+        if group_col in df_main.columns:
+            df_merged = pd.merge(df_main, df_metrics, on=group_col, how="left")
+        else:
+            df_merged = df_main # Fallback
+            
         return df_merged
 
     # ==================== 1. CLIENTES POR EMISSORA ====================
     st.subheader("1. Número de Clientes por Emissora (Comparativo)")
-    base_clientes_raw = (
-        base_periodo.groupby(["emissora", "ano"])["cliente"]
-        .nunique().unstack(fill_value=0).reset_index()
-    )
+    base_clientes_raw = base_periodo.groupby(["emissora", "ano"])["cliente"].nunique().unstack(fill_value=0).reset_index()
     for ano in [ano_base, ano_comp]:
         if ano not in base_clientes_raw.columns: base_clientes_raw[ano] = 0
 
     base_clientes_raw["Δ"] = base_clientes_raw[ano_comp] - base_clientes_raw[ano_base]
     base_clientes_raw["Δ%"] = np.where(base_clientes_raw[ano_base] > 0, (base_clientes_raw["Δ"] / base_clientes_raw[ano_base]) * 100, np.nan)
     
-    # Totalizador
-    if not base_clientes_raw.empty:
-        total_A = base_clientes_raw[ano_base].sum()
-        total_B = base_clientes_raw[ano_comp].sum()
+    # Separa Total
+    df_1_main = base_clientes_raw.copy()
+    df_1_total = pd.DataFrame()
+
+    if not df_1_main.empty:
+        total_A = df_1_main[ano_base].sum()
+        total_B = df_1_main[ano_comp].sum()
         total_delta = total_B - total_A
         total_pct = (total_delta / total_A * 100) if total_A > 0 else np.nan
-        total_row = {"emissora": "Totalizador", ano_base: total_A, ano_comp: total_B, "Δ": total_delta, "Δ%": total_pct}
-        base_clientes_raw = pd.concat([base_clientes_raw, pd.DataFrame([total_row])], ignore_index=True)
-
-    base_clientes_raw.insert(0, "#", list(range(1, len(base_clientes_raw))) + ["Total"])
+        
+        # Cria linha total
+        df_1_total = pd.DataFrame([{
+            "emissora": "Totalizador", 
+            ano_base: total_A, 
+            ano_comp: total_B, 
+            "Δ": total_delta, 
+            "Δ%": total_pct
+        }])
     
-    # Display
-    base_clientes_display = base_clientes_raw.copy()
-    base_clientes_display = base_clientes_display.rename(columns={"emissora": "Emissora"})
-    base_clientes_display.columns = base_clientes_display.columns.map(str)
-    base_clientes_display['#'] = base_clientes_display['#'].astype(str)
-    base_clientes_display["Δ%"] = base_clientes_display["Δ%"].apply(format_percent_col)
+    # Prepara Visualização
+    df_1_main.insert(0, "#", range(1, len(df_1_main) + 1))
+    df_1_total.insert(0, "#", ["Total"])
+    
+    # Renomeia
+    rename_1 = {"emissora": "Emissora"}
+    df_1_main = df_1_main.rename(columns=rename_1)
+    df_1_total = df_1_total.rename(columns=rename_1)
+    
+    # Converte colunas para string para o display
+    df_1_main.columns = df_1_main.columns.map(str)
+    df_1_total.columns = df_1_total.columns.map(str)
+    
+    # Formatação Específica
+    df_1_main["Δ%"] = df_1_main["Δ%"].apply(format_percent_col)
+    df_1_total["Δ%"] = df_1_total["Δ%"].apply(format_percent_col)
+    df_1_main['#'] = df_1_main['#'].astype(str)
 
-    st.dataframe(
-        base_clientes_display.style.map(color_delta, subset=["Δ", "Δ%"]), 
-        hide_index=True, width="stretch", column_config={"#": None}
+    # EXIBE COMBINADO
+    export_1 = display_combined_table(
+        df_1_main, 
+        df_1_total, 
+        format_dict=None, 
+        color_cols=["Δ", "Δ%"]
     )
     st.divider()
 
-    # ==================== 2. FATURAMENTO POR EMISSORA (COM INSERÇÕES) ====================
+    # ==================== 2. FATURAMENTO POR EMISSORA ====================
     st.subheader("2. Faturamento por Emissora (com Eficiência)")
-    
-    # Pivot de Faturamento
     base_emissora_raw = base_periodo.groupby(["emissora", "ano"])["faturamento"].sum().unstack(fill_value=0).reset_index()
     for ano in [ano_base, ano_comp]:
         if ano not in base_emissora_raw.columns: base_emissora_raw[ano] = 0.0
@@ -134,192 +195,192 @@ def render(df, mes_ini, mes_fim, show_labels, ultima_atualizacao=None):
     base_emissora_raw["Δ"] = base_emissora_raw[ano_comp] - base_emissora_raw[ano_base]
     base_emissora_raw["Δ%"] = np.where(base_emissora_raw[ano_base] > 0, (base_emissora_raw["Δ"] / base_emissora_raw[ano_base]) * 100, np.nan)
     
-    # Adiciona Inserções e Custo Unitário
-    base_emissora_raw = enrich_with_metrics(base_emissora_raw, "emissora")
+    base_emissora_raw = enrich_with_metrics_split(base_emissora_raw, "emissora")
 
-    # Totalizador
-    if not base_emissora_raw.empty:
-        total_A = base_emissora_raw[ano_base].sum()
-        total_B = base_emissora_raw[ano_comp].sum()
-        total_delta = total_B - total_A
-        total_pct = (total_delta / total_A * 100) if total_A > 0 else np.nan
+    df_2_main = base_emissora_raw.copy()
+    df_2_total = pd.DataFrame()
+
+    if not df_2_main.empty:
+        tA = df_2_main[ano_base].sum()
+        tB = df_2_main[ano_comp].sum()
+        tDelta = tB - tA
+        tPct = (tDelta / tA * 100) if tA > 0 else np.nan
         
-        total_ins = base_emissora_raw["Total_Ins"].sum()
-        total_fat_periodo = base_periodo["faturamento"].sum()
-        total_custo = total_fat_periodo / total_ins if total_ins > 0 else np.nan
+        tInsA = df_2_main[f"Ins_{ano_base}"].sum()
+        tInsB = df_2_main[f"Ins_{ano_comp}"].sum()
+        avgCA = tA / tInsA if tInsA > 0 else np.nan
+        avgCB = tB / tInsB if tInsB > 0 else np.nan
 
-        total_row = {
-            "emissora": "Totalizador", 
-            ano_base: total_A, 
-            ano_comp: total_B, 
-            "Δ": total_delta, 
-            "Δ%": total_pct,
-            "Total_Ins": total_ins,
-            "Custo Unit.": total_custo
-        }
-        base_emissora_raw = pd.concat([base_emissora_raw, pd.DataFrame([total_row])], ignore_index=True)
+        df_2_total = pd.DataFrame([{
+            "emissora": "Totalizador",
+            ano_base: tA, ano_comp: tB, "Δ": tDelta, "Δ%": tPct,
+            f"Ins_{ano_base}": tInsA, f"Ins_{ano_comp}": tInsB,
+            f"Custo_{ano_base}": avgCA, f"Custo_{ano_comp}": avgCB
+        }])
 
-    base_emissora_raw.insert(0, "#", list(range(1, len(base_emissora_raw))) + ["Total"])
-    
-    # Display
-    base_emissora_display = base_emissora_raw.copy()
-    base_emissora_display = base_emissora_display.rename(columns={
+    df_2_main.insert(0, "#", range(1, len(df_2_main) + 1))
+    df_2_total.insert(0, "#", ["Total"])
+
+    rename_2 = {
         "emissora": "Emissora",
-        "Total_Ins": "Inserções (Total)",
-        "Custo Unit.": "Custo Médio (R$)"
-    })
-    base_emissora_display.columns = base_emissora_display.columns.map(str)
-    base_emissora_display['#'] = base_emissora_display['#'].astype(str)
-    base_emissora_display["Δ%"] = base_emissora_display["Δ%"].apply(format_percent_col)
+        f"Ins_{ano_base}": f"Ins. {ano_base}", f"Ins_{ano_comp}": f"Ins. {ano_comp}",
+        f"Custo_{ano_base}": f"Custo Médio Unitário ({ano_base})", f"Custo_{ano_comp}": f"Custo Médio Unitário ({ano_comp})"
+    }
     
-    # Formatação de colunas extras
-    base_emissora_display["Inserções (Total)"] = base_emissora_display["Inserções (Total)"].apply(format_int)
-    base_emissora_display["Custo Médio (R$)"] = base_emissora_display["Custo Médio (R$)"].apply(brl)
+    df_2_main = df_2_main.rename(columns=rename_2)
+    df_2_total = df_2_total.rename(columns=rename_2)
+    df_2_main.columns = df_2_main.columns.map(str)
+    df_2_total.columns = df_2_total.columns.map(str)
+    
+    # Format
+    for d in [df_2_main, df_2_total]:
+        if not d.empty:
+            d["Δ%"] = d["Δ%"].apply(format_percent_col)
+            d[f"Ins. {ano_base}"] = d[f"Ins. {ano_base}"].apply(format_int)
+            d[f"Ins. {ano_comp}"] = d[f"Ins. {ano_comp}"].apply(format_int)
+            d[f"Custo Médio Unitário ({ano_base})"] = d[f"Custo Médio Unitário ({ano_base})"].apply(brl)
+            d[f"Custo Médio Unitário ({ano_comp})"] = d[f"Custo Médio Unitário ({ano_comp})"].apply(brl)
+            d['#'] = d['#'].astype(str)
 
-    st.dataframe(
-        base_emissora_display.style.map(color_delta, subset=["Δ", "Δ%"])
-        .format({str(ano_base): brl, str(ano_comp): brl, "Δ": brl}), 
-        hide_index=True, width="stretch", column_config={"#": None}
+    export_2 = display_combined_table(
+        df_2_main, df_2_total,
+        format_dict={str(ano_base): brl, str(ano_comp): brl, "Δ": brl},
+        color_cols=["Δ", "Δ%"]
     )
     st.divider()
 
-    # ==================== 3. FATURAMENTO POR EXECUTIVO (COM INSERÇÕES) ====================
+    # ==================== 3. FATURAMENTO POR EXECUTIVO ====================
     st.subheader("3. Faturamento por Executivo (com Eficiência)")
     tx_raw = base_periodo.groupby(["executivo", "ano"])["faturamento"].sum().unstack(fill_value=0).reset_index()
     for ano in [ano_base, ano_comp]:
         if ano not in tx_raw.columns: tx_raw[ano] = 0.0
-
+    
     tx_raw["Δ"] = tx_raw[ano_comp] - tx_raw[ano_base]
     tx_raw["Δ%"] = np.where(tx_raw[ano_base] > 0, (tx_raw["Δ"] / tx_raw[ano_base]) * 100, np.nan)
-    
-    # Adiciona Inserções
-    tx_raw = enrich_with_metrics(tx_raw, "executivo")
+    tx_raw = enrich_with_metrics_split(tx_raw, "executivo")
 
-    if not tx_raw.empty:
-        total_A = tx_raw[ano_base].sum()
-        total_B = tx_raw[ano_comp].sum()
-        total_delta = total_B - total_A
-        total_pct = (total_delta / total_A * 100) if total_A > 0 else np.nan
-        total_ins = tx_raw["Total_Ins"].sum()
-        total_custo = base_periodo["faturamento"].sum() / total_ins if total_ins > 0 else np.nan
+    df_3_main = tx_raw.copy()
+    df_3_total = pd.DataFrame()
 
-        total_row = {
-            "executivo": "Totalizador", 
-            ano_base: total_A, 
-            ano_comp: total_B, 
-            "Δ": total_delta, 
-            "Δ%": total_pct,
-            "Total_Ins": total_ins,
-            "Custo Unit.": total_custo
-        }
-        tx_raw = pd.concat([tx_raw, pd.DataFrame([total_row])], ignore_index=True)
+    if not df_3_main.empty:
+        tA = df_3_main[ano_base].sum()
+        tB = df_3_main[ano_comp].sum()
+        tDelta = tB - tA
+        tPct = (tDelta / tA * 100) if tA > 0 else np.nan
+        tInsA = df_3_main[f"Ins_{ano_base}"].sum()
+        tInsB = df_3_main[f"Ins_{ano_comp}"].sum()
+        avgCA = tA / tInsA if tInsA > 0 else np.nan
+        avgCB = tB / tInsB if tInsB > 0 else np.nan
 
-    tx_raw.insert(0, "#", list(range(1, len(tx_raw))) + ["Total"])
-    
-    # Display
-    tx_display = tx_raw.copy()
-    tx_display = tx_display.rename(columns={
+        df_3_total = pd.DataFrame([{
+            "executivo": "Totalizador",
+            ano_base: tA, ano_comp: tB, "Δ": tDelta, "Δ%": tPct,
+            f"Ins_{ano_base}": tInsA, f"Ins_{ano_comp}": tInsB,
+            f"Custo_{ano_base}": avgCA, f"Custo_{ano_comp}": avgCB
+        }])
+
+    df_3_main.insert(0, "#", range(1, len(df_3_main) + 1))
+    df_3_total.insert(0, "#", ["Total"])
+
+    rename_3 = {
         "executivo": "Executivo",
-        "Total_Ins": "Inserções",
-        "Custo Unit.": "Custo Médio"
-    })
-    tx_display.columns = tx_display.columns.map(str)
-    tx_display['#'] = tx_display['#'].astype(str)
-    tx_display["Δ%"] = tx_display["Δ%"].apply(format_percent_col)
-    tx_display["Inserções"] = tx_display["Inserções"].apply(format_int)
-    tx_display["Custo Médio"] = tx_display["Custo Médio"].apply(brl)
+        f"Ins_{ano_base}": f"Ins. {ano_base}", f"Ins_{ano_comp}": f"Ins. {ano_comp}",
+        f"Custo_{ano_base}": f"Custo Médio Unitário ({ano_base})", f"Custo_{ano_comp}": f"Custo Médio Unitário ({ano_comp})"
+    }
+    
+    df_3_main = df_3_main.rename(columns=rename_3)
+    df_3_total = df_3_total.rename(columns=rename_3)
+    df_3_main.columns = df_3_main.columns.map(str)
+    df_3_total.columns = df_3_total.columns.map(str)
 
-    st.dataframe(
-        tx_display.style.map(color_delta, subset=["Δ", "Δ%"])
-        .format({
-            str(ano_base): brl, 
-            str(ano_comp): brl, 
-            "Δ": brl
-        }), 
-        hide_index=True, width="stretch", column_config={"#": None}
+    for d in [df_3_main, df_3_total]:
+        if not d.empty:
+            d["Δ%"] = d["Δ%"].apply(format_percent_col)
+            d[f"Ins. {ano_base}"] = d[f"Ins. {ano_base}"].apply(format_int)
+            d[f"Ins. {ano_comp}"] = d[f"Ins. {ano_comp}"].apply(format_int)
+            d[f"Custo Médio Unitário ({ano_base})"] = d[f"Custo Médio Unitário ({ano_base})"].apply(brl)
+            d[f"Custo Médio Unitário ({ano_comp})"] = d[f"Custo Médio Unitário ({ano_comp})"].apply(brl)
+            d['#'] = d['#'].astype(str)
+
+    export_3 = display_combined_table(
+        df_3_main, df_3_total,
+        format_dict={str(ano_base): brl, str(ano_comp): brl, "Δ": brl},
+        color_cols=["Δ", "Δ%"]
     )
     st.divider()
 
-    # ==================== 4. MÉDIAS (INVESTIMENTO E INSERÇÕES) ====================
+    # ==================== 4. MÉDIAS ====================
     st.subheader("4. Médias por Cliente (Investimento e Inserções)")
     t16_raw = base_periodo.groupby("emissora").agg(
-        Faturamento=("faturamento", "sum"), 
-        Insercoes=("insercoes", "sum"),
-        Clientes=("cliente", "nunique")
+        Faturamento=("faturamento", "sum"), Insercoes=("insercoes", "sum"), Clientes=("cliente", "nunique")
     ).reset_index()
-    
     t16_raw["Média Invest./Cliente"] = np.where(t16_raw["Clientes"] == 0, np.nan, t16_raw["Faturamento"] / t16_raw["Clientes"])
     t16_raw["Média Inserções/Cliente"] = np.where(t16_raw["Clientes"] == 0, np.nan, t16_raw["Insercoes"] / t16_raw["Clientes"])
-    
-    if not t16_raw.empty:
-        total_fat = t16_raw["Faturamento"].sum()
-        total_ins = t16_raw["Insercoes"].sum()
-        total_cli = base_periodo["cliente"].nunique() 
-        
-        med_fat = (total_fat / total_cli) if total_cli > 0 else np.nan
-        med_ins = (total_ins / total_cli) if total_cli > 0 else np.nan
-        
-        total_row = {
-            "emissora": "Totalizador", 
-            "Faturamento": total_fat, 
-            "Insercoes": total_ins,
-            "Clientes": total_cli, 
-            "Média Invest./Cliente": med_fat,
-            "Média Inserções/Cliente": med_ins
-        }
-        t16_raw = pd.concat([t16_raw, pd.DataFrame([total_row])], ignore_index=True)
 
-    t16_raw.insert(0, "#", list(range(1, len(t16_raw))) + ["Total"])
-    
-    t16_disp = t16_raw.copy()
-    t16_disp = t16_disp.rename(columns={"emissora": "Emissora", "Insercoes": "Total Inserções"})
-    
-    # Formatações mistas
-    t16_disp["Faturamento"] = t16_disp["Faturamento"].apply(brl)
-    t16_disp["Total Inserções"] = t16_disp["Total Inserções"].apply(format_int)
-    t16_disp["Média Invest./Cliente"] = t16_disp["Média Invest./Cliente"].apply(brl)
-    t16_disp["Média Inserções/Cliente"] = t16_disp["Média Inserções/Cliente"].apply(lambda x: f"{x:,.1f}" if pd.notna(x) else "-")
-    t16_disp['#'] = t16_disp['#'].astype(str)
-    
-    st.dataframe(t16_disp, width="stretch", hide_index=True, column_config={"#": None})
+    df_4_main = t16_raw.copy()
+    df_4_total = pd.DataFrame()
+
+    if not df_4_main.empty:
+        tfat = df_4_main["Faturamento"].sum()
+        tins = df_4_main["Insercoes"].sum()
+        tcli = base_periodo["cliente"].nunique()
+        mfat = tfat/tcli if tcli > 0 else np.nan
+        mins = tins/tcli if tcli > 0 else np.nan
+        
+        df_4_total = pd.DataFrame([{
+            "emissora": "Totalizador", "Faturamento": tfat, "Insercoes": tins,
+            "Clientes": tcli, "Média Invest./Cliente": mfat, "Média Inserções/Cliente": mins
+        }])
+
+    df_4_main.insert(0, "#", range(1, len(df_4_main) + 1))
+    df_4_total.insert(0, "#", ["Total"])
+
+    rename_4 = {"emissora": "Emissora", "Insercoes": "Total Inserções"}
+    df_4_main = df_4_main.rename(columns=rename_4)
+    df_4_total = df_4_total.rename(columns=rename_4)
+
+    for d in [df_4_main, df_4_total]:
+        if not d.empty:
+            d["Faturamento"] = d["Faturamento"].apply(brl)
+            d["Total Inserções"] = d["Total Inserções"].apply(format_int)
+            d["Média Invest./Cliente"] = d["Média Invest./Cliente"].apply(brl)
+            d["Média Inserções/Cliente"] = d["Média Inserções/Cliente"].apply(lambda x: f"{x:,.1f}" if pd.notna(x) else "-")
+            d['#'] = d['#'].astype(str)
+
+    export_4 = display_combined_table(df_4_main, df_4_total)
     st.divider()
 
     # ==================== 5. FATURAMENTO TOTAL ====================
     st.subheader("5. Faturamento por Emissora (Total)")
-    # Reutiliza tabela 2, mas simplificada
-    t15_raw = base_emissora_raw.copy()
-    
-    # Seleciona apenas colunas de totais
-    cols_to_keep = ["emissora", "ano", "Δ", "Δ%", "Total_Ins", "Custo Unit."]
-    # Mas aqui queremos só o total do periodo filtrado, vamos simplificar:
     t15_simple = base_periodo.groupby("emissora", as_index=False).agg(
-        Faturamento=("faturamento", "sum"),
-        Insercoes=("insercoes", "sum")
+        Faturamento=("faturamento", "sum"), Insercoes=("insercoes", "sum")
     ).sort_values("Faturamento", ascending=False)
-    
     t15_simple["Custo Unitário"] = np.where(t15_simple["Insercoes"] > 0, t15_simple["Faturamento"] / t15_simple["Insercoes"], np.nan)
 
-    if not t15_simple.empty:
-        tot_fat = t15_simple["Faturamento"].sum()
-        tot_ins = t15_simple["Insercoes"].sum()
-        tot_custo = tot_fat / tot_ins if tot_ins > 0 else np.nan
-        
-        t15_simple = pd.concat([t15_simple, pd.DataFrame([{
-            "emissora": "Totalizador", 
-            "Faturamento": tot_fat, 
-            "Insercoes": tot_ins,
-            "Custo Unitário": tot_custo
-        }])], ignore_index=True)
-    
-    t15_simple.insert(0, "#", list(range(1, len(t15_simple))) + ["Total"])
-    
-    t15_disp = t15_simple.copy().rename(columns={"emissora": "Emissora"})
-    t15_disp["Faturamento"] = t15_disp["Faturamento"].apply(brl)
-    t15_disp["Insercoes"] = t15_disp["Insercoes"].apply(format_int)
-    t15_disp["Custo Unitário"] = t15_disp["Custo Unitário"].apply(brl)
-    t15_disp['#'] = t15_disp['#'].astype(str)
-    
-    st.dataframe(t15_disp, width="stretch", hide_index=True, column_config={"#": None})
+    df_5_main = t15_simple.copy()
+    df_5_total = pd.DataFrame()
+
+    if not df_5_main.empty:
+        tf = df_5_main["Faturamento"].sum()
+        ti = df_5_main["Insercoes"].sum()
+        tc = tf/ti if ti > 0 else np.nan
+        df_5_total = pd.DataFrame([{"emissora": "Totalizador", "Faturamento": tf, "Insercoes": ti, "Custo Unitário": tc}])
+
+    df_5_main.insert(0, "#", range(1, len(df_5_main)+1))
+    df_5_total.insert(0, "#", ["Total"])
+
+    rename_5 = {"emissora": "Emissora", "Insercoes": "Inserções", "Custo Unitário": "Custo Médio Unitário"}
+    df_5_main = df_5_main.rename(columns=rename_5)
+    df_5_total = df_5_total.rename(columns=rename_5)
+
+    for d in [df_5_main, df_5_total]:
+        if not d.empty:
+            d["Faturamento"] = d["Faturamento"].apply(brl)
+            d["Inserções"] = d["Inserções"].apply(format_int)
+            d["Custo Médio Unitário"] = d["Custo Médio Unitário"].apply(brl)
+            d['#'] = d['#'].astype(str)
+
+    export_5 = display_combined_table(df_5_main, df_5_total)
     st.divider()
 
     # ==================== 6. COMPARATIVO MÊS A MÊS ====================
@@ -328,99 +389,153 @@ def render(df, mes_ini, mes_fim, show_labels, ultima_atualizacao=None):
     base_para_tabela = base_periodo.copy()
     base_para_tabela["mes_nome"] = base_para_tabela["mes"].map(mes_map)
     
-    t14_agg = base_para_tabela.groupby(["ano", "mes", "mes_nome"])["faturamento"].sum().reset_index()
-    t14_raw = t14_agg.pivot(index=["mes", "mes_nome"], columns="ano", values="faturamento").fillna(0.0)
+    piv_fat = base_para_tabela.groupby(["ano", "mes", "mes_nome"])["faturamento"].sum().reset_index().pivot(index=["mes", "mes_nome"], columns="ano", values="faturamento").fillna(0.0)
+    piv_ins = base_para_tabela.groupby(["ano", "mes", "mes_nome"])["insercoes"].sum().reset_index().pivot(index=["mes", "mes_nome"], columns="ano", values="insercoes").fillna(0.0)
     
-    if not t14_raw.empty:
-        t14_raw = t14_raw.sort_index(level="mes")
-        t14_raw.index = t14_raw.index.get_level_values('mes_nome')
-        t14_raw.index.name = "Mês"
+    if not piv_fat.empty:
+        for ano in [ano_base, ano_comp]:
+            if ano not in piv_fat.columns: piv_fat[ano] = 0.0
+            if ano not in piv_ins.columns: piv_ins[ano] = 0.0
+            
+        c_base = np.where(piv_ins[ano_base] > 0, piv_fat[ano_base] / piv_ins[ano_base], np.nan)
+        c_comp = np.where(piv_ins[ano_comp] > 0, piv_fat[ano_comp] / piv_ins[ano_comp], np.nan)
         
-        total_row = t14_raw.sum()
-        total_row.name = "Totalizador"
-        t14_raw = pd.concat([t14_raw, pd.DataFrame([total_row])])
+        # Se os anos forem iguais, não duplicamos colunas
+        if ano_base == ano_comp:
+            t14_final = pd.DataFrame({
+                f"Fat. {ano_base}": piv_fat[ano_base],
+                f"Ins. {ano_base}": piv_ins[ano_base],
+                f"Custo {ano_base}": c_base,
+            }, index=piv_fat.index)
+        else:
+            t14_final = pd.DataFrame({
+                f"Fat. {ano_base}": piv_fat[ano_base], f"Fat. {ano_comp}": piv_fat[ano_comp],
+                f"Ins. {ano_base}": piv_ins[ano_base], f"Ins. {ano_comp}": piv_ins[ano_comp],
+                f"Custo {ano_base}": c_base, f"Custo {ano_comp}": c_comp
+            }, index=piv_fat.index)
         
-        t14_disp = t14_raw.reset_index()
-        t14_disp.columns = t14_disp.columns.map(str)
+        t14_final = t14_final.sort_index(level="mes")
         
-        format_dict = {col: brl for col in t14_disp.columns if col != "Mês"}
-        st.dataframe(t14_disp.style.format(format_dict), width="stretch", hide_index=True)
+        # Totalizador separado
+        total_row_dict = {}
+        for col in t14_final.columns:
+            if "Custo" not in col: total_row_dict[col] = t14_final[col].sum()
+        
+        if f"Fat. {ano_base}" in total_row_dict:
+            f = total_row_dict[f"Fat. {ano_base}"]
+            i = total_row_dict[f"Ins. {ano_base}"]
+            total_row_dict[f"Custo {ano_base}"] = f/i if i > 0 else np.nan
+             
+        if ano_base != ano_comp and f"Fat. {ano_comp}" in total_row_dict:
+             f = total_row_dict[f"Fat. {ano_comp}"]
+             i = total_row_dict[f"Ins. {ano_comp}"]
+             total_row_dict[f"Custo {ano_comp}"] = f/i if i > 0 else np.nan
+
+        df_6_main = t14_final.reset_index(level="mes", drop=True).reset_index()
+        df_6_total = pd.DataFrame([total_row_dict])
+        
+        # Apenas visual
+        df_6_main = df_6_main.rename(columns={"mes_nome": "Mês"})
+        df_6_total["Mês"] = "Totalizador"
+
+        for d in [df_6_main, df_6_total]:
+            d.columns = d.columns.map(str)
+            for col in d.columns:
+                if "Fat." in col: d[col] = d[col].apply(brl)
+                if "Ins." in col: d[col] = d[col].apply(format_int)
+                if "Custo" in col:
+                    new_name = col.replace("Custo", "Custo Médio Unitário")
+                    d.rename(columns={col: new_name}, inplace=True)
+                    d[new_name] = d[new_name].apply(brl)
+
+        export_6 = display_combined_table(df_6_main, df_6_total)
     else:
-        st.info("Sem dados suficientes para o comparativo mensal.")
+        st.info("Sem dados mensais.")
+        export_6 = None
     
     st.divider()
 
-    # ==================== 7. RELAÇÃO DE CLIENTES (SHARE %) ====================
+    # ==================== 7. RELAÇÃO DE CLIENTES ====================
     st.subheader(f"7. Relação de Clientes ({ano_base} vs {ano_comp})")
     
-    t17_raw = base_periodo.groupby(["cliente", "ano"])["faturamento"].sum().unstack(fill_value=0).reset_index()
+    t17_fat = base_periodo.groupby(["cliente", "ano"])["faturamento"].sum().unstack(fill_value=0)
+    t17_ins = base_periodo.groupby(["cliente", "ano"])["insercoes"].sum().unstack(fill_value=0)
+    
     for ano in [ano_base, ano_comp]:
-        if ano not in t17_raw.columns: t17_raw[ano] = 0.0
+        if ano not in t17_fat.columns: t17_fat[ano] = 0.0
+        if ano not in t17_ins.columns: t17_ins[ano] = 0.0
         
-    t17_raw["Total"] = t17_raw[ano_base] + t17_raw[ano_comp]
-    total_geral = t17_raw["Total"].sum()
-    t17_raw["Share %"] = (t17_raw["Total"] / total_geral * 100) if total_geral > 0 else 0.0
-
-    # Adiciona Inserções e Custo
-    t17_raw = enrich_with_metrics(t17_raw, "cliente")
-
-    t17_raw = t17_raw.sort_values("Total", ascending=False).reset_index(drop=True)
+    t17_raw = pd.concat([t17_fat, t17_ins], axis=1)
+    if ano_base == ano_comp:
+         t17_raw = pd.concat([t17_fat[[ano_base]], t17_ins[[ano_base]]], axis=1)
+         t17_raw.columns = [f"Fat_{ano_base}", f"Ins_{ano_base}"]
+    else:
+         t17_raw.columns = [f"Fat_{ano}" for ano in t17_fat.columns] + [f"Ins_{ano}" for ano in t17_ins.columns]
     
-    if not t17_raw.empty:
-        sum_A = t17_raw[ano_base].sum()
-        sum_B = t17_raw[ano_comp].sum()
-        sum_T = t17_raw["Total"].sum()
-        sum_Ins = t17_raw["Total_Ins"].sum()
-        avg_custo = sum_T / sum_Ins if sum_Ins > 0 else np.nan
+    t17_raw = t17_raw.reset_index()
 
-        total_row_17 = {
-            "cliente": "Totalizador", 
-            ano_base: sum_A, 
-            ano_comp: sum_B, 
-            "Total": sum_T, 
-            "Share %": 100.0,
-            "Total_Ins": sum_Ins,
-            "Custo Unit.": avg_custo
-        }
-        t17_raw = pd.concat([t17_raw, pd.DataFrame([total_row_17])], ignore_index=True)
+    cols_fat = [c for c in t17_raw.columns if c.startswith("Fat_")]
+    cols_ins = [c for c in t17_raw.columns if c.startswith("Ins_")]
+    
+    t17_raw["Total Fat"] = t17_raw[cols_fat].sum(axis=1)
+    t17_raw["Total Ins"] = t17_raw[cols_ins].sum(axis=1)
+    tgf = t17_raw["Total Fat"].sum()
+    t17_raw["Share %"] = (t17_raw["Total Fat"] / tgf * 100) if tgf > 0 else 0.0
+    
+    for cf, ci in zip(cols_fat, cols_ins):
+        yr = cf.split("_")[1]
+        t17_raw[f"Custo_{yr}"] = np.where(t17_raw[ci] > 0, t17_raw[cf] / t17_raw[ci], np.nan)
+
+    t17_raw = t17_raw.sort_values("Total Fat", ascending=False).reset_index(drop=True)
+
+    df_7_main = t17_raw.copy()
+    df_7_total = pd.DataFrame()
+
+    if not df_7_main.empty:
+        tot_d = {"cliente": "Totalizador", "Share %": 100.0}
+        for c in df_7_main.columns:
+            if c not in ["cliente", "Share %"] and not c.startswith("Custo_"):
+                tot_d[c] = df_7_main[c].sum()
         
-    t17_disp = t17_raw.copy()
-    t17_disp = t17_disp.rename(columns={
-        "cliente": "Cliente",
-        "Total_Ins": "Inserções (Qtd)",
-        "Custo Unit.": "Custo Médio (R$)"
-    })
-    t17_disp.columns = t17_disp.columns.map(str) 
-    
-    # Formatação
-    t17_disp["Inserções (Qtd)"] = t17_disp["Inserções (Qtd)"].apply(format_int)
-    t17_disp["Custo Médio (R$)"] = t17_disp["Custo Médio (R$)"].apply(brl)
+        for cf, ci in zip(cols_fat, cols_ins):
+            yr = cf.split("_")[1]
+            f, i = tot_d[cf], tot_d[ci]
+            tot_d[f"Custo_{yr}"] = f/i if i > 0 else np.nan
+            
+        df_7_total = pd.DataFrame([tot_d])
 
-    st.dataframe(
-        t17_disp.style.format({
-            str(ano_base): brl, 
-            str(ano_comp): brl, 
-            "Total": brl,
-            "Share %": "{:.2f}%"
-        }), 
-        width="stretch", 
-        hide_index=True,
-        height=450
+    rename_7 = {"cliente": "Cliente", "Total Fat": "Faturamento Total", "Total Ins": "Inserções Total"}
+    for c in df_7_main.columns:
+        if c.startswith("Fat_"): rename_7[c] = f"Faturamento ({c.split('_')[1]})"
+        if c.startswith("Ins_"): rename_7[c] = f"Inserções ({c.split('_')[1]})"
+        if c.startswith("Custo_"): rename_7[c] = f"Custo Médio Unitário ({c.split('_')[1]})"
+
+    for d in [df_7_main, df_7_total]:
+        if not d.empty:
+            d.rename(columns=rename_7, inplace=True)
+            for col in d.columns:
+                if "Faturamento" in col or "Custo" in col: d[col] = d[col].apply(brl)
+                if "Inserções" in col: d[col] = d[col].apply(format_int)
+    
+    # Ordenação colunas
+    final_cols = ["Cliente"]
+    years = [ano_base, ano_comp] if ano_base != ano_comp else [ano_base]
+    for y in years:
+        final_cols.extend([f"Faturamento ({y})", f"Inserções ({y})", f"Custo Médio Unitário ({y})"])
+    final_cols.extend(["Faturamento Total", "Inserções Total", "Share %"])
+    
+    # Filtra existentes
+    final_cols = [c for c in final_cols if c in df_7_main.columns]
+    df_7_main = df_7_main[final_cols]
+    df_7_total = df_7_total[final_cols] if not df_7_total.empty else df_7_total
+
+    export_7 = display_combined_table(
+        df_7_main, df_7_total,
+        format_dict={"Share %": "{:.2f}%"}
     )
-
     st.divider()
 
     # ==================== EXPORTAÇÃO ====================
-    def get_filter_string():
-        f = st.session_state 
-        ano_ini = f.get("filtro_ano_ini", "N/A")
-        ano_fim = f.get("filtro_ano_fim", "N/A")
-        emis = ", ".join(f.get("filtro_emis", ["Todas"]))
-        execs = ", ".join(f.get("filtro_execs", ["Todos"]))
-        meses = ", ".join(f.get("filtro_meses_lista", ["Todos"]))
-        clientes = ", ".join(f.get("filtro_clientes", ["Todos"])) if f.get("filtro_clientes") else "Todos"
-        return (f"Período (Ano): {ano_ini} a {ano_fim} | Meses: {meses} | Emissoras: {emis} | Executivos: {execs} | Clientes: {clientes}")
-
     if st.button("📥 Exportar Dados da Página", type="secondary"):
         st.session_state.show_clientes_export = True
     
@@ -430,35 +545,38 @@ def render(df, mes_ini, mes_fim, show_labels, ultima_atualizacao=None):
     if st.session_state.get("show_clientes_export", False):
         @st.dialog("Opções de Exportação - Clientes & Faturamento")
         def export_dialog():
-            t17_exp = t17_raw.rename(columns={"cliente": "Cliente"}) if not t17_raw.empty else None
             
-            # Opções Atualizadas
             table_options = {
-                "1. Clientes (Emissora)": {'df': base_clientes_raw},
-                "2. Fat. + Inserções (Emissora)": {'df': base_emissora_raw},
-                "3. Fat. + Inserções (Executivo)": {'df': tx_raw},
-                "4. Médias Completas (Cliente)": {'df': t16_raw},
-                "5. Fat. Total (Emissora)": {'df': t15_simple},
-                "6. Comp. (Mês a Mês)": {'df': t14_raw.reset_index()},
-                "7. Relação Clientes Detalhada": {'df': t17_exp},
+                "1. Clientes (Emissora)": {'df': export_1},
+                "2. Fat. + Inserções (Emissora)": {'df': export_2},
+                "3. Fat. + Inserções (Executivo)": {'df': export_3},
+                "4. Médias Completas (Cliente)": {'df': export_4},
+                "5. Fat. Total (Emissora)": {'df': export_5},
+                "6. Comp. (Mês a Mês)": {'df': export_6},
+                "7. Relação Clientes Detalhada": {'df': export_7},
             }
-            available_options = [name for name, data in table_options.items() if data.get('df') is not None and not data['df'].empty]
             
-            if not available_options:
+            # Filtra apenas o que existe
+            final_options = {k: v for k, v in table_options.items() if v['df'] is not None and not v['df'].empty}
+
+            if not final_options:
                 st.warning("Nenhuma tabela com dados foi gerada.")
-                if st.button("Fechar", type="secondary"):
-                    st.session_state.show_clientes_export = False
-                    st.rerun()
+                if st.button("Fechar", type="secondary"): st.session_state.show_clientes_export = False; st.rerun()
                 return
+
             st.write("Selecione os itens para exportar:")
-            selected_names = st.multiselect("Itens", options=available_options, default=available_options)
-            tables_to_export = {name: table_options[name] for name in selected_names}
+            selected_names = st.multiselect("Itens", options=final_options.keys(), default=final_options.keys())
+            tables_to_export = {name: final_options[name] for name in selected_names}
 
             if not tables_to_export:
                 st.error("Selecione pelo menos um item.")
                 return
 
             try:
+                def get_filter_string():
+                    f = st.session_state 
+                    return (f"Período: {f.get('filtro_ano_ini')}-{f.get('filtro_ano_fim')} ...")
+
                 filtro_str = get_filter_string()
                 zip_data = create_zip_package(tables_to_export, filtro_str)
                 st.download_button("Clique para baixar", data=zip_data, file_name="Dashboard_Clientes_Faturamento.zip", mime="application/zip", on_click=lambda: st.session_state.update(show_clientes_export=False), type="secondary")

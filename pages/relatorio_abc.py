@@ -17,12 +17,13 @@ def render(df, mes_ini, mes_fim, show_labels, ultima_atualizacao=None):
     st.markdown("<h2 style='text-align: center; color: #003366;'>Relatório ABC (Pareto)</h2>", unsafe_allow_html=True)
     st.markdown("<div style='margin-bottom: 20px;'></div>", unsafe_allow_html=True)
 
+    # Legenda explicativa com as novas cores
     st.markdown("""
     <div style='font-size: 0.9rem; color: #555; margin-bottom: 10px; text-align: center;'>
     <b>Classificação:</b> 
-    <span style='color:#16a34a; font-weight:bold;'>Classe A</span> (até 80%) • 
-    <span style='color:#2563eb; font-weight:bold;'>Classe B</span> (próximos 15%) • 
-    <span style='color:#d97706; font-weight:bold;'>Classe C</span> (últimos 5%)
+    <span style='color:#FFD700; font-weight:bold; text-shadow: 1px 1px 1px #999;'>Classe A</span> (até 80%) • 
+    <span style='color:#A9A9A9; font-weight:bold; text-shadow: 1px 1px 1px #ccc;'>Classe B</span> (próximos 15%) • 
+    <span style='color:#A0522D; font-weight:bold;'>Classe C</span> (últimos 5%)
     </div>
     """, unsafe_allow_html=True)
 
@@ -143,15 +144,26 @@ def render(df, mes_ini, mes_fim, show_labels, ultima_atualizacao=None):
     with col_graf:
         st.markdown("<p class='custom-chart-title'>1. Distribuição da Carteira (Clientes)</p>", unsafe_allow_html=True)
         
-        # Gráfico de Pizza (Sempre mostra distribuição de Qtd de Clientes, pois é isso que o Pareto analisa: % da base)
+        # Cores Personalizadas (Ouro, Prata, Bronze Enferrujado)
+        abc_colors = {
+            'A': '#FFD700',  # Ouro Vivo
+            'B': '#C0C0C0',  # Prata
+            'C': '#A0522D'   # Bronze/Sienna (Enferrujado)
+        }
+
+        # Gráfico de Pizza
         fig_pie = px.pie(
             resumo_classes.reset_index(), 
             values='Qtd_Clientes', 
             names='classe', 
             color='classe',
-            color_discrete_map={'A': '#16a34a', 'B': '#2563eb', 'C': '#d97706'},
+            color_discrete_map=abc_colors,
+            category_orders={"classe": ["A", "B", "C"]}, # Força ordem A -> B -> C
             hole=0.4
         )
+        # Rótulos: Valor Bruto (Quantidade de Clientes)
+        fig_pie.update_traces(textinfo='value')
+        
         fig_pie.update_layout(height=350, margin=dict(t=20, b=20, l=20, r=20))
         st.plotly_chart(fig_pie, width="stretch")
 
@@ -166,6 +178,8 @@ def render(df, mes_ini, mes_fim, show_labels, ultima_atualizacao=None):
         # Formatação dos valores
         df_display["faturamento_fmt"] = df_display["faturamento"].apply(brl)
         df_display["insercoes_fmt"] = df_display["insercoes"].apply(format_int)
+        
+        # Custo Médio (ainda numérico para formatação via column_config se quisesse, mas vamos de string formatada)
         df_display["custo_fmt"] = df_display["custo_medio"].apply(lambda x: brl(x) if pd.notna(x) else "-")
         
         # Seleção e Renomeação
@@ -177,10 +191,17 @@ def render(df, mes_ini, mes_fim, show_labels, ultima_atualizacao=None):
         df_display.index = range(1, len(df_display) + 1)
         df_display.index.name = "Rank"
         
+        # Configuração da Coluna "Custo Médio" (CMU)
         st.dataframe(
             df_display, 
             height=350, 
-            width="stretch"
+            width="stretch",
+            column_config={
+                "Custo Médio": st.column_config.Column(
+                    label="CMU ℹ️",
+                    help="Custo Médio Unitário"
+                )
+            }
         )
         
         # Guarda para exportação

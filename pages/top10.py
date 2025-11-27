@@ -51,6 +51,24 @@ def format_int(val):
     if pd.isna(val) or val == 0: return "-"
     return f"{int(val):,}".replace(",", ".")
 
+# ==================== FUNÇÃO AUXILIAR DE ESTILO ====================
+def display_styled_table(df):
+    """
+    Renderiza o dataframe aplicando estilo de destaque (Totalizador) na última linha.
+    """
+    if df.empty: return
+
+    def highlight_total_row(row):
+        if row.name == (len(df) - 1): # Última linha
+            return ['background-color: #e6f3ff; font-weight: bold; color: #003366'] * len(row)
+        return [''] * len(row)
+
+    st.dataframe(
+        df.style.apply(highlight_total_row, axis=1), 
+        width="stretch", 
+        hide_index=True
+    )
+
 def render(df, mes_ini, mes_fim, show_labels, ultima_atualizacao=None):
     # ==================== TÍTULO CENTRALIZADO ====================
     st.markdown("<h2 style='text-align: center; color: #003366;'>Top 10 Maiores Anunciantes</h2>", unsafe_allow_html=True)
@@ -87,24 +105,28 @@ def render(df, mes_ini, mes_fim, show_labels, ultima_atualizacao=None):
     
     criterio = st.session_state.top10_metric
 
-    # Ajuste de colunas para caber 3 botões
     col1, col2, col3 = st.columns([1.5, 1, 2.5])
     
-    # Opção de Consolidado
+    # Opção de Consolidado para Emissora
     opcoes_emissora = ["Consolidado (Seleção Atual)"] + emis_list
     
-    emis_sel = col1.selectbox("Emissora / Visão", opcoes_emissora)
-    ano_sel = col2.selectbox("Ano", anos_list, index=len(anos_list)-1)
+    # Opção de Consolidado para Ano
+    opcoes_ano = ["Consolidado (Seleção Atual)"] + anos_list
     
-    # --- BOTÕES ESTILIZADOS (3 Opções) ---
+    emis_sel = col1.selectbox("Emissora / Visão", opcoes_emissora)
+    
+    # Default: Último ano da lista (que é o último item de opcoes_ano)
+    default_ano_idx = len(opcoes_ano) - 1
+    ano_sel = col2.selectbox("Ano", opcoes_ano, index=default_ano_idx)
+    
+    # --- BOTÕES ESTILIZADOS ---
     with col3:
         st.markdown('<p style="font-size:0.85rem; font-weight:600; margin-bottom: 0px;">Classificar por:</p>', unsafe_allow_html=True)
         b1, b2, b3 = st.columns(3)
         
-        # Define estilo (Primary = Azul/Ativo, Secondary = Branco/Inativo)
         type_fat = "primary" if criterio == "Faturamento" else "secondary"
         type_ins = "primary" if criterio == "Inserções" else "secondary"
-        type_efc = "primary" if criterio == "Menor Custo Unitário" else "secondary"
+        type_efc = "primary" if criterio == "Eficiência" else "secondary"
         
         if b1.button("Faturamento", type=type_fat, use_container_width=True):
             st.session_state.top10_metric = "Faturamento"
@@ -114,17 +136,22 @@ def render(df, mes_ini, mes_fim, show_labels, ultima_atualizacao=None):
             st.session_state.top10_metric = "Inserções"
             st.rerun()
 
-        if b3.button("Menor Custo Unitário", type=type_efc, use_container_width=True):
-            st.session_state.top10_metric = "Menor Custo Unitário"
+        if b3.button("Eficiência", type=type_efc, help="Menor Custo Unitário", use_container_width=True):
+            st.session_state.top10_metric = "Eficiência"
             st.rerun()
 
-    # Lógica de Filtro baseada na seleção
+    # ==================== LÓGICA DE FILTRAGEM ====================
+    # 1. Filtro de Emissora
     if emis_sel == "Consolidado (Seleção Atual)":
-        base = base_periodo[base_periodo["ano"] == ano_sel]
+        base = base_periodo.copy()
         cor_grafico = PALETTE[3] # Azul Escuro
     else:
-        base = base_periodo[(base_periodo["ano"] == ano_sel) & (base_periodo["emissora"] == emis_sel)]
+        base = base_periodo[base_periodo["emissora"] == emis_sel].copy()
         cor_grafico = PALETTE[0] # Azul Claro
+
+    # 2. Filtro de Ano
+    if ano_sel != "Consolidado (Seleção Atual)":
+        base = base[base["ano"] == ano_sel]
 
     # ==================== PROCESSAMENTO ====================
     # Agrupa por cliente somando métricas
@@ -134,7 +161,6 @@ def render(df, mes_ini, mes_fim, show_labels, ultima_atualizacao=None):
     )
     
     # Calcula Custo Unitário
-    # Evita divisão por zero e infinitos
     top10_raw["custo_unitario"] = np.where(
         top10_raw["insercoes"] > 0, 
         top10_raw["faturamento"] / top10_raw["insercoes"], 
@@ -148,10 +174,9 @@ def render(df, mes_ini, mes_fim, show_labels, ultima_atualizacao=None):
     elif criterio == "Inserções":
         col_sort = "insercoes"
         ascending = False
-    else: # Menor Custo Unitário
+    else: # Eficiência
         col_sort = "custo_unitario"
-        ascending = True # Do menor para o maior
-        # Filtra clientes sem inserções para não poluir o ranking de eficiência com zeros inválidos
+        ascending = True 
         top10_raw = top10_raw[top10_raw["insercoes"] > 0]
 
     # Pega Top 10
@@ -161,7 +186,7 @@ def render(df, mes_ini, mes_fim, show_labels, ultima_atualizacao=None):
         # Tabela com Totalizador para exportação
         top10_with_total = top10_raw.copy()
         
-        # Totais (Custo Unitário do total é recalculado)
+        # Totais
         tot_fat = top10_with_total["faturamento"].sum()
         tot_ins = top10_with_total["insercoes"].sum()
         tot_custo = tot_fat / tot_ins if tot_ins > 0 else np.nan
@@ -176,7 +201,7 @@ def render(df, mes_ini, mes_fim, show_labels, ultima_atualizacao=None):
         top10_with_total.insert(0, "#", list(range(1, len(top10_raw) + 1)) + ["Total"])
         top10_raw_export = top10_with_total.copy()
 
-        # Display Tabela (Mostra as 3 métricas sempre)
+        # Display Tabela
         top10_display = top10_with_total.copy()
         top10_display['#'] = top10_display['#'].astype(str)
         top10_display["faturamento_fmt"] = top10_display["faturamento"].apply(brl)
@@ -190,10 +215,10 @@ def render(df, mes_ini, mes_fim, show_labels, ultima_atualizacao=None):
             "custo_fmt": "Custo Médio"
         })
         
-        st.dataframe(tabela, width="stretch", hide_index=True) 
+        display_styled_table(tabela)
 
-        # Display Gráfico (Mostra apenas a métrica do critério)
-        is_currency = (criterio == "Faturamento" or criterio == "Menor Custo Unitário")
+        # Display Gráfico
+        is_currency = (criterio == "Faturamento" or criterio == "Eficiência")
         
         if criterio == "Faturamento":
             y_col, y_label = "faturamento", "Faturamento (R$)"
@@ -202,8 +227,10 @@ def render(df, mes_ini, mes_fim, show_labels, ultima_atualizacao=None):
         else:
             y_col, y_label = "custo_unitario", "Custo Unitário (R$)"
         
-        # Cor padrão (Azul) para todos os gráficos
-        cor_grafico_final = cor_grafico
+        if criterio == "Eficiência":
+            cor_grafico_final = "#16a34a" # Verde
+        else:
+            cor_grafico_final = cor_grafico
 
         fig = px.bar(
             top10_raw.head(10), 
@@ -250,9 +277,12 @@ def render(df, mes_ini, mes_fim, show_labels, ultima_atualizacao=None):
         @st.dialog("Opções de Exportação - Top 10")
         def export_dialog():
             nome_arq = "Global" if emis_sel.startswith("Consolidado") else emis_sel
+            
+            # Tratamento para nome do arquivo
+            ano_arq = "Consolidado" if str(ano_sel).startswith("Consolidado") else str(ano_sel)
             criterio_arq = criterio.replace(" ", "_")
             
-            # Prepara DF para exportação com nomes bonitos
+            # Prepara DF para exportação
             df_exp = top10_raw_export.rename(columns={
                 "cliente": "Cliente", 
                 "faturamento": "Faturamento",
@@ -283,10 +313,10 @@ def render(df, mes_ini, mes_fim, show_labels, ultima_atualizacao=None):
 
             try:
                 filtro_str = get_filter_string()
-                filtro_str += f" | Visão Top 10: {emis_sel} | Critério: {criterio}"
+                filtro_str += f" | Visão Top 10: {emis_sel} | Critério: {criterio} | Ano Base: {ano_sel}"
                 
                 zip_data = create_zip_package(tables_to_export, filtro_str)
-                st.download_button("Clique para baixar", data=zip_data, file_name=f"Dashboard_Top10_{nome_arq}_{criterio_arq}_{ano_sel}.zip", mime="application/zip", on_click=lambda: st.session_state.update(show_top10_export=False), type="secondary")
+                st.download_button("Clique para baixar", data=zip_data, file_name=f"Dashboard_Top10_{nome_arq}_{criterio_arq}_{ano_arq}.zip", mime="application/zip", on_click=lambda: st.session_state.update(show_top10_export=False), type="secondary")
             except Exception as e:
                 st.error(f"Erro ao gerar ZIP: {e}")
 
