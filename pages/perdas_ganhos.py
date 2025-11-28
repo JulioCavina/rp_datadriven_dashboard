@@ -379,11 +379,12 @@ def render(df, mes_ini, mes_fim, show_labels, ultima_atualizacao=None):
             df_vc_exp = var_cli_raw if not var_cli_raw.empty else None
             df_ve_exp = var_emis_raw if not var_emis_raw.empty else None
 
+            # Chaves padronizadas com " (Dados)"
             table_options = {
-                "1. Clientes Perdidos": {'df': df_p_exp}, 
-                "2. Clientes Ganhos": {'df': df_g_exp}, 
-                "3. Variações (Cliente)": {'df': df_vc_exp}, 
-                "4. Variações (Emissora)": {'df': df_ve_exp}
+                f"1. Clientes Perdidos (Saíram de {ano_base}) (Dados)": {'df': df_p_exp}, 
+                f"2. Clientes Novos (Entraram em {ano_comp}) (Dados)": {'df': df_g_exp}, 
+                "3. Variações por Cliente (Dados)": {'df': df_vc_exp}, 
+                "4. Variações por Emissora (Dados)": {'df': df_ve_exp}
             }
             available_options = [name for name, data in table_options.items() if data.get('df') is not None and not data['df'].empty]
             
@@ -393,8 +394,8 @@ def render(df, mes_ini, mes_fim, show_labels, ultima_atualizacao=None):
                     st.session_state.show_perdas_export = False
                     st.rerun()
                 return
-            st.write("Selecione os itens para exportar:")
-            selected_names = st.multiselect("Itens", options=available_options, default=available_options)
+            
+            selected_names = st.multiselect("Selecione os itens para exportar:", options=available_options, default=available_options)
             tables_to_export = {name: table_options[name] for name in selected_names}
             
             if not tables_to_export:
@@ -403,8 +404,21 @@ def render(df, mes_ini, mes_fim, show_labels, ultima_atualizacao=None):
 
             try:
                 filtro_str = get_filter_string()
-                zip_data = create_zip_package(tables_to_export, filtro_str)
-                st.download_button("Clique para baixar", data=zip_data, file_name=f"Perdas_Ganhos_{ano_base}_{ano_comp}.zip", mime="application/zip", on_click=lambda: st.session_state.update(show_perdas_export=False), type="secondary")
+                
+                # Nomes corretos para ZIP e Excel Interno
+                nome_interno_excel = "Dashboard_Perdas_Ganhos.xlsx"
+                zip_filename = "Dashboard_Perdas_Ganhos.zip"
+                
+                zip_data = create_zip_package(tables_to_export, filtro_str, excel_filename=nome_interno_excel)
+                
+                st.download_button(
+                    label="Clique para baixar", 
+                    data=zip_data, 
+                    file_name=zip_filename, 
+                    mime="application/zip", 
+                    on_click=lambda: st.session_state.update(show_perdas_export=False), 
+                    type="secondary"
+                )
             except Exception as e:
                 st.error(f"Erro ao gerar ZIP: {e}")
 

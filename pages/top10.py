@@ -59,14 +59,15 @@ def display_styled_table(df):
     if df.empty: return
 
     def highlight_total_row(row):
-        if row.name == (len(df) - 1): # Última linha
+        if row.name == (len(df) - 1): # Última linha (Totalizador)
             return ['background-color: #e6f3ff; font-weight: bold; color: #003366'] * len(row)
         return [''] * len(row)
 
     st.dataframe(
         df.style.apply(highlight_total_row, axis=1), 
         width="stretch", 
-        hide_index=True
+        hide_index=True,
+        column_config={"#": st.column_config.TextColumn("#", width="small")}
     )
 
 def render(df, mes_ini, mes_fim, show_labels, ultima_atualizacao=None):
@@ -291,8 +292,8 @@ def render(df, mes_ini, mes_fim, show_labels, ultima_atualizacao=None):
             }) if not top10_raw_export.empty else None
 
             all_options = {
-                "Top 10 (Tabela Dados)": {'df': df_exp}, 
-                "Top 10 (Gráfico HTML)": {'fig': fig}
+                "Top 10 Maiores Anunciantes (Dados)": {'df': df_exp}, 
+                "Top 10 Maiores Anunciantes (Gráfico)": {'fig': fig}
             }
             available_options = [name for name, data in all_options.items() if (data.get('df') is not None and not data['df'].empty) or (data.get('fig') is not None and data['fig'].data)]
             
@@ -303,8 +304,7 @@ def render(df, mes_ini, mes_fim, show_labels, ultima_atualizacao=None):
                     st.rerun()
                 return
 
-            st.write("Selecione os itens para exportar:")
-            selected_names = st.multiselect("Itens", options=available_options, default=available_options)
+            selected_names = st.multiselect("Selecione os itens para exportar:", options=available_options, default=available_options)
             tables_to_export = {name: all_options[name] for name in selected_names}
             
             if not tables_to_export:
@@ -315,8 +315,20 @@ def render(df, mes_ini, mes_fim, show_labels, ultima_atualizacao=None):
                 filtro_str = get_filter_string()
                 filtro_str += f" | Visão Top 10: {emis_sel} | Critério: {criterio} | Ano Base: {ano_sel}"
                 
-                zip_data = create_zip_package(tables_to_export, filtro_str)
-                st.download_button("Clique para baixar", data=zip_data, file_name=f"Dashboard_Top10_{nome_arq}_{criterio_arq}_{ano_arq}.zip", mime="application/zip", on_click=lambda: st.session_state.update(show_top10_export=False), type="secondary")
+                # NOME DO ARQUIVO EXCEL INTERNO
+                nome_interno_excel = "Dashboard_Top10.xlsx"
+                zip_filename = f"Dashboard_Top10.zip"
+                
+                zip_data = create_zip_package(tables_to_export, filtro_str, excel_filename=nome_interno_excel)
+                
+                st.download_button(
+                    label="Clique para baixar", 
+                    data=zip_data, 
+                    file_name=zip_filename, 
+                    mime="application/zip", 
+                    on_click=lambda: st.session_state.update(show_top10_export=False), 
+                    type="secondary"
+                )
             except Exception as e:
                 st.error(f"Erro ao gerar ZIP: {e}")
 

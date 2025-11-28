@@ -546,14 +546,15 @@ def render(df, mes_ini, mes_fim, show_labels, ultima_atualizacao=None):
         @st.dialog("Opções de Exportação - Clientes & Faturamento")
         def export_dialog():
             
+            # --- ATUALIZADO: Títulos com (Dados) e Nome do Arquivo .xlsx ---
             table_options = {
-                "1. Clientes (Emissora)": {'df': export_1},
-                "2. Fat. + Inserções (Emissora)": {'df': export_2},
-                "3. Fat. + Inserções (Executivo)": {'df': export_3},
-                "4. Médias Completas (Cliente)": {'df': export_4},
-                "5. Fat. Total (Emissora)": {'df': export_5},
-                "6. Comp. (Mês a Mês)": {'df': export_6},
-                "7. Relação Clientes Detalhada": {'df': export_7},
+                "1. Número de Clientes por Emissora (Dados)": {'df': export_1},
+                "2. Faturamento por Emissora (Dados)": {'df': export_2},
+                "3. Faturamento por Executivo (Dados)": {'df': export_3},
+                "4. Médias por Cliente (Dados)": {'df': export_4},
+                "5. Faturamento por Emissora Total (Dados)": {'df': export_5},
+                "6. Comparativo mês a mês (Dados)": {'df': export_6},
+                "7. Relação de Clientes Detalhada (Dados)": {'df': export_7},
             }
             
             # Filtra apenas o que existe
@@ -564,8 +565,7 @@ def render(df, mes_ini, mes_fim, show_labels, ultima_atualizacao=None):
                 if st.button("Fechar", type="secondary"): st.session_state.show_clientes_export = False; st.rerun()
                 return
 
-            st.write("Selecione os itens para exportar:")
-            selected_names = st.multiselect("Itens", options=final_options.keys(), default=final_options.keys())
+            selected_names = st.multiselect("Selecione os itens para exportar:", options=final_options.keys(), default=final_options.keys())
             tables_to_export = {name: final_options[name] for name in selected_names}
 
             if not tables_to_export:
@@ -578,7 +578,14 @@ def render(df, mes_ini, mes_fim, show_labels, ultima_atualizacao=None):
                     return (f"Período: {f.get('filtro_ano_ini')}-{f.get('filtro_ano_fim')} ...")
 
                 filtro_str = get_filter_string()
-                zip_data = create_zip_package(tables_to_export, filtro_str)
+                
+                # --- NOME DO ARQUIVO EXCEL INTERNO ---
+                zip_data = create_zip_package(
+                    tables_to_export, 
+                    filtro_str, 
+                    excel_filename="Dashboard_ClienteFaturamento.xlsx"
+                )
+                
                 st.download_button("Clique para baixar", data=zip_data, file_name="Dashboard_Clientes_Faturamento.zip", mime="application/zip", on_click=lambda: st.session_state.update(show_clientes_export=False), type="secondary")
             except Exception as e:
                 st.error(f"Erro ao gerar ZIP: {e}")

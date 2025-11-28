@@ -26,7 +26,8 @@ def display_styled_table(df):
     st.dataframe(
         df.style.apply(highlight_total_row, axis=1), 
         width="stretch", 
-        hide_index=True
+        hide_index=True,
+        column_config={"#": st.column_config.TextColumn("#", width="small")}
     )
 
 def render(df, mes_ini, mes_fim, show_labels, ultima_atualizacao=None):
@@ -264,9 +265,9 @@ def render(df, mes_ini, mes_fim, show_labels, ultima_atualizacao=None):
         @st.dialog("Opções de Exportação - Eficiência")
         def export_dialog():
             table_options = {
-                "1. Matriz Eficiência (Dados Brutos)": {'df': scatter_data},
-                "1. Matriz Eficiência (Gráfico HTML)": {'fig': fig_scatter if not scatter_data.empty else None},
-                "2. Resumo por Emissora (Anual)": {'df': grp_ano}
+                "1. Matriz de Eficiência (Preço vs. Volume) (Dados)": {'df': scatter_data},
+                "1. Matriz de Eficiência (Preço vs. Volume) (Gráfico)": {'fig': fig_scatter if not scatter_data.empty else None},
+                "2. Resumo de Eficiência por Emissora (Comparativo Anual) (Dados)": {'df': grp_ano}
             }
             
             available_options = [name for name, data in table_options.items() if (data.get('df') is not None and not data['df'].empty) or (data.get('fig') is not None)]
@@ -288,8 +289,21 @@ def render(df, mes_ini, mes_fim, show_labels, ultima_atualizacao=None):
 
             try:
                 filtro_str = get_filter_string()
-                zip_data = create_zip_package(tables_to_export, filtro_str)
-                st.download_button("Clique para baixar", data=zip_data, file_name="Dashboard_Eficiencia.zip", mime="application/zip", on_click=lambda: st.session_state.update(show_efi_export=False), type="secondary")
+                
+                # Nomes corretos para ZIP e Excel Interno
+                nome_interno_excel = "Dashboard_Eficiencia.xlsx"
+                zip_filename = "Dashboard_Eficiencia.zip"
+                
+                zip_data = create_zip_package(tables_to_export, filtro_str, excel_filename=nome_interno_excel)
+                
+                st.download_button(
+                    label="Clique para baixar", 
+                    data=zip_data, 
+                    file_name=zip_filename, 
+                    mime="application/zip", 
+                    on_click=lambda: st.session_state.update(show_efi_export=False), 
+                    type="secondary"
+                )
             except Exception as e:
                 st.error(f"Erro ao gerar ZIP: {e}")
 

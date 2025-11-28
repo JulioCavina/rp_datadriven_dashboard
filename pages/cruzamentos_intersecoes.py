@@ -378,7 +378,6 @@ def render(df, mes_ini, mes_fim, show_labels, ultima_atualizacao=None):
     st.divider()
 
     # ==================== 6. COMPARATIVO CUSTO UNITÁRIO ====================
-    # ATUALIZADO: Título novo e lógica de Totalizador Média
     st.subheader("6. Comparativo de Custo Médio Unitário (Clientes Compartilhados)")
     
     if compartilhados_mask.any():
@@ -407,32 +406,23 @@ def render(df, mes_ini, mes_fim, show_labels, ultima_atualizacao=None):
         pivot_cost = pivot_cost.sort_values("_sort_val", ascending=False).drop(columns="_sort_val")
         
         # --- CÁLCULO DA LINHA TOTALIZADORA (MÉDIA) ---
-        # Resetamos o índice para tratar 'cliente' como coluna
         pivot_cost_reset = pivot_cost.reset_index()
-        
-        # Calcula média das colunas numéricas
         mean_values = pivot_cost.mean(numeric_only=True)
-        
-        # Cria a linha de total
         total_row_data = {"cliente": "Totalizador"}
         for col in pivot_cost.columns:
             total_row_data[col] = mean_values[col]
             
         total_df = pd.DataFrame([total_row_data])
-        
-        # Concatena
         df_final = pd.concat([pivot_cost_reset, total_df], ignore_index=True)
         
-        # --- FORMATAÇÃO E EXIBIÇÃO ---
+        # --- FORMATAÇÃO ---
         pivot_cost_display = df_final.copy()
         pivot_cost_display = pivot_cost_display.rename(columns={"cliente": "Cliente"})
         
-        # Formata todas as colunas exceto 'Cliente'
         cols_to_fmt = [c for c in pivot_cost_display.columns if c != "Cliente"]
         for col in cols_to_fmt:
             pivot_cost_display[col] = pivot_cost_display[col].apply(lambda x: brl(x) if pd.notna(x) else "-")
             
-        # Exibe usando a função de estilo para pegar a formatação da última linha
         display_styled_table(pivot_cost_display)
         
     else:
@@ -460,15 +450,15 @@ def render(df, mes_ini, mes_fim, show_labels, ultima_atualizacao=None):
     if st.session_state.get("show_cruzamentos_export", False):
         @st.dialog("Opções de Exportação - Cruzamentos")
         def export_dialog():
-            # Prepara DFs para exportação com nomes bonitos
+            # Títulos padronizados para Exportação
             table_options = {
-                "1. Clientes Exclusivos": {'df': df_excl_raw},
-                "2. Clientes Compartilhados": {'df': df_comp_raw},
-                "3. Clientes Ausentes": {'df': df_ausentes_raw}, # Novo
-                "4. Top Compartilhados": {'df': top_shared_raw},
-                "5. Matriz (Dados)": {'df': mat_raw.reset_index().rename(columns={'index':'Emissora'})},
-                "5. Matriz (Gráfico)": {'fig': fig_mat},
-                "6. Comparativo Custo Unitário": {'df': pivot_cost_display} 
+                "1. Clientes Exclusivos por Emissora (Dados)": {'df': df_excl_raw},
+                "2. Clientes Compartilhados por Emissora (Dados)": {'df': df_comp_raw},
+                "3. Clientes Ausentes por Emissora (Oportunidade) (Dados)": {'df': df_ausentes_raw}, 
+                "4. Top clientes compartilhados (2+ emissoras) (Dados)": {'df': top_shared_raw},
+                f"5. Interseções entre emissoras - {metric_label} (Dados)": {'df': mat_raw.reset_index().rename(columns={'index':'Emissora'})},
+                f"5. Interseções entre emissoras - {metric_label} (Gráfico)": {'fig': fig_mat},
+                "6. Comparativo de Custo Médio Unitário (Clientes Compartilhados) (Dados)": {'df': pivot_cost_display.reset_index()} 
             }
             
             available_options = [name for name, data in table_options.items() if (data.get('df') is not None and not data['df'].empty) or (data.get('fig') is not None and data['fig'].data)]
@@ -480,8 +470,8 @@ def render(df, mes_ini, mes_fim, show_labels, ultima_atualizacao=None):
                     st.rerun()
                 return
 
-            st.write("Selecione os itens para exportar:")
-            selected_names = st.multiselect("Itens", options=available_options, default=available_options)
+            
+            selected_names = st.multiselect("Selecione os itens para exportar:", options=available_options, default=available_options)
             tables_to_export = {name: table_options[name] for name in selected_names}
             
             if not tables_to_export:
@@ -490,8 +480,21 @@ def render(df, mes_ini, mes_fim, show_labels, ultima_atualizacao=None):
 
             try:
                 filtro_str = get_filter_string()
-                zip_data = create_zip_package(tables_to_export, filtro_str)
-                st.download_button("Clique para baixar", data=zip_data, file_name="Dashboard_Cruzamentos.zip", mime="application/zip", on_click=lambda: st.session_state.update(show_cruzamentos_export=False), type="secondary")
+                
+                # Nomes corretos para ZIP e Excel Interno
+                nome_interno_excel = "Dashboard_Cruzamentos.xlsx"
+                zip_filename = "Dashboard_Cruzamentos.zip"
+                
+                zip_data = create_zip_package(tables_to_export, filtro_str, excel_filename=nome_interno_excel)
+                
+                st.download_button(
+                    label="Clique para baixar", 
+                    data=zip_data, 
+                    file_name=zip_filename, 
+                    mime="application/zip", 
+                    on_click=lambda: st.session_state.update(show_cruzamentos_export=False), 
+                    type="secondary"
+                )
             except Exception as e:
                 st.error(f"Erro ao gerar ZIP: {e}")
 

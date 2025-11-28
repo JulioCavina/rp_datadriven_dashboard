@@ -179,7 +179,7 @@ def render(df, mes_ini, mes_fim, show_labels, ultima_atualizacao=None):
         df_display["faturamento_fmt"] = df_display["faturamento"].apply(brl)
         df_display["insercoes_fmt"] = df_display["insercoes"].apply(format_int)
         
-        # Custo Médio (ainda numérico para formatação via column_config se quisesse, mas vamos de string formatada)
+        # Custo Médio
         df_display["custo_fmt"] = df_display["custo_medio"].apply(lambda x: brl(x) if pd.notna(x) else "-")
         
         # Seleção e Renomeação
@@ -224,11 +224,11 @@ def render(df, mes_ini, mes_fim, show_labels, ultima_atualizacao=None):
         st.caption(f"📅 Última atualização da base de dados: {ultima_atualizacao}")
 
     if st.session_state.get("show_abc_export", False):
-        @st.dialog("Opções de Exportação - Curva ABC")
+        @st.dialog("Opções de Exportação - Relatório ABC")
         def export_dialog():
             table_options = {
                 "1. Distribuição da Carteira (Dados)": {'df': resumo_classes.reset_index()},
-                "1. Distribuição da Carteira (Gráfico HTML)": {'fig': fig_pie},
+                "1. Distribuição da Carteira (Gráfico)": {'fig': fig_pie}, # Corrigido
                 "2. Detalhamento dos Clientes (Dados)": {'df': df_abc_export}
             }
             
@@ -241,8 +241,7 @@ def render(df, mes_ini, mes_fim, show_labels, ultima_atualizacao=None):
                     st.rerun()
                 return
 
-            st.write("Selecione os itens para exportar:")
-            selected_names = st.multiselect("Itens", options=available_options, default=available_options)
+            selected_names = st.multiselect("Selecione os itens para exportar:", options=available_options, default=available_options)
             tables_to_export = {name: table_options[name] for name in selected_names}
             
             if not tables_to_export:
@@ -251,8 +250,20 @@ def render(df, mes_ini, mes_fim, show_labels, ultima_atualizacao=None):
 
             try:
                 filtro_str = get_filter_string()
-                zip_data = create_zip_package(tables_to_export, filtro_str)
-                st.download_button("Clique para baixar", data=zip_data, file_name=f"Dashboard_ABC_{criterio}.zip", mime="application/zip", on_click=lambda: st.session_state.update(show_abc_export=False), type="secondary")
+                
+                # Nome Interno Fixo
+                nome_interno_excel = "Dashboard_Relatorio_ABC.xlsx"
+                
+                zip_data = create_zip_package(tables_to_export, filtro_str, excel_filename=nome_interno_excel)
+                
+                st.download_button(
+                    label="Clique para baixar", 
+                    data=zip_data, 
+                    file_name=f"Dashboard_Relatorio_ABC.zip", 
+                    mime="application/zip", 
+                    on_click=lambda: st.session_state.update(show_abc_export=False), 
+                    type="secondary"
+                )
             except Exception as e:
                 st.error(f"Erro ao gerar ZIP: {e}")
 

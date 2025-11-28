@@ -1,100 +1,122 @@
 # utils/export.py
+
 import io
+import zipfile
 import pandas as pd
-import streamlit as st 
-import plotly.io as pio
-import zipfile 
-import openpyxl 
+import re
 
-# Tenta importar as bibliotecas de imagem (apenas para verificação, não usado para HTML)
-try:
-    from openpyxl.drawing.image import Image as OpenpyxlImage # type: ignore
-    from PIL import Image as PillowImage # type: ignore
-    PIL_AVAILABLE = True
-except ImportError:
-    PIL_AVAILABLE = False
-
-
-def create_zip_package(tables_to_export: dict, active_filters: str = "") -> bytes:
+def clean_sheet_name(name):
     """
-    Cria um arquivo ZIP in-memory contendo o arquivo XLSX (com filtros no cabeçalho) e os gráficos HTML.
-    
-    Args:
-        tables_to_export: Dicionário de DFs e Figuras.
-        active_filters: String contendo os filtros ativos para injeção nas células A1/A2.
-    
-    Returns:
-        Bytes do arquivo ZIP.
+    Limpa o nome para abas do Excel (max 31 chars).
     """
+    # Remove caracteres proibidos
+    clean = re.sub(r'[\[\]:*?/\\]', '', str(name))
     
-    zip_buffer = io.BytesIO()
-    has_real_data = False 
+    if len(clean) <= 31:
+        return clean
+    
+    # Estratégia de abreviação: Pega os primeiros 20 chars + ".." + últimos 9 chars
+    return clean[:20] + ".." + clean[-9:]
 
-    with zipfile.ZipFile(zip_buffer, 'w', zipfile.ZIP_DEFLATED) as zf:
-        
-        # --- A. Geração do Arquivo Excel (.xlsx) ---
-        excel_buffer = io.BytesIO()
-        engine = 'openpyxl'
-        
-        try:
-            import openpyxl
-        except ImportError:
-            st.error("A biblioteca 'openpyxl' é necessária para criar o Excel.")
-            return b""
+def clean_chart_title(title_key):
+    """
+    Limpa o título para o gráfico PNG.
+    1. Remove numeração inicial (Ex: '1. ')
+    2. Remove o texto '(Gráfico)' ou variações.
+    """
+    # 1. Remove padrão "número + ponto + espaço" do início
+    s = re.sub(r'^\d+\.\s*', '', str(title_key))
+    
+    # 2. Remove o sufixo exato " (Gráfico)"
+    s = s.replace(" (Gráfico)", "")
+    
+    # 3. Limpeza extra para casos como "(Gráfico 2024)" -> "(2024)"
+    s = s.replace("(Gráfico ", "(")
+    
+    return s
 
-        with pd.ExcelWriter(excel_buffer, engine=engine) as writer:
-            
-            for sheet_name, data in tables_to_export.items():
-                if data.get('df') is not None and not data['df'].empty:
-                    safe_name = sheet_name.replace(":", "").replace("/", "")[:31]
-                    df = data['df']
-                    
-                    # 1. Exporta a tabela para começar na linha 3 (startrow=2 é base 0)
-                    # Isso deixa A1 e A2 livres.
-                    df.to_excel(writer, sheet_name=safe_name, index=False, startrow=2) 
-                    has_real_data = True
-                    
-                    # 2. Injeta os filtros nas células A1 e A2
-                    # Acessa a worksheet do openpyxl criada pelo pandas
-                    ws = writer.sheets[safe_name]
-                    
-                    ws['A1'] = "FILTROS ATIVOS NO MOMENTO DA EXPORTAÇÃO:"
-                    # Estiliza A1 com negrito (opcional, mas bom para destaque)
-                    ws['A1'].font = openpyxl.styles.Font(bold=True)
-                    
-                    ws['A2'] = active_filters
-                    ws['A2'].alignment = openpyxl.styles.Alignment(wrap_text=False)
-            
-            # Garante que o ExcelWriter não falhe se não houver abas de dados
-            if not has_real_data:
-                info_df = pd.DataFrame({'Info': ['Este arquivo de dados não possui tabelas, pois apenas gráficos foram selecionados para exportação.']})
-                info_df.to_excel(writer, sheet_name='Info_Vazio', index=False)
+def to_excel_with_images(data_dict, filter_info):
+    """
+    Gera um arquivo Excel em memória contendo DataFrames e Imagens (Plots).
+    """
+    output = io.BytesIO()
+    
+    with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
+        workbook = writer.book
         
-        # Define o nome do arquivo Excel no ZIP
-        excel_filename = 'Dados_Tabelas.xlsx'
+        # --- ABA 1: FILTROS ---
+        df_info = pd.DataFrame([{"Filtros Aplicados": filter_info}])
+        df_info.to_excel(writer, sheet_name="Filtros", index=False)
+        worksheet_filtros = writer.sheets["Filtros"]
+        worksheet_filtros.set_column('A:A', 100)
+        worksheet_filtros.hide_gridlines(2) 
         
-        # Só grava o Excel no ZIP se tiver dados reais. 
-        # Se for só gráfico, a gente ignora o Excel gerado (que só teria a aba Info_Vazio).
-        # Porém, a lógica de "deletar" o buffer é complexa. 
-        # Vamos gravar o buffer SOMENTE se has_real_data for True.
-        if has_real_data:
-            zf.writestr(excel_filename, excel_buffer.getvalue())
+        # --- ABAS DE DADOS E GRÁFICOS ---
+        for key, value in data_dict.items():
+            sheet_name = clean_sheet_name(key)
+            
+            # 1. Se for Tabela
+            if 'df' in value and value['df'] is not None and not value['df'].empty:
+                value['df'].to_excel(writer, sheet_name=sheet_name, index=False)
+                worksheet = writer.sheets[sheet_name]
+                worksheet.set_column('A:Z', 18)
 
-        # --- B. Geração e Adição dos Gráficos HTML ao ZIP ---
-        for sheet_name, data in tables_to_export.items():
-            fig = data.get('fig')
-            
-            if fig is not None:
-                try:
-                    safe_name = sheet_name.replace(":", "").replace("/", "")[:31]
-                    # Gera HTML completo
-                    html_content = pio.to_html(fig, full_html=True, include_plotlyjs='cdn')
-                    
-                    file_name = f"{safe_name}_Grafico.html"
-                    zf.writestr(file_name, html_content)
+            # 2. Se for Gráfico
+            elif 'fig' in value and value['fig'] is not None:
+                pd.DataFrame().to_excel(writer, sheet_name=sheet_name)
+                worksheet = writer.sheets[sheet_name]
+                worksheet.hide_gridlines(2)
                 
+                try:
+                    # Limpa o título (Remove "1." e "(Gráfico)")
+                    chart_title = clean_chart_title(key)
+                    fig_to_export = value['fig']
+                    
+                    # === REGRAS DE LAYOUT ===
+                    layout_args = {
+                        'title': {
+                            'text': chart_title,
+                            'y': 0.95,
+                            'x': 0.5,
+                            'xanchor': 'center',
+                            'yanchor': 'top'
+                        },
+                        'title_font': dict(size=24, color="#003366", family="Arial, sans-serif"),
+                        'margin': dict(t=80), 
+                        'paper_bgcolor': 'rgba(0,0,0,0)',
+                        'plot_bgcolor': 'rgba(0,0,0,0)'
+                    }
+
+                    # === REGRA EXCLUSIVA PARA EVOLUÇÃO MENSAL ===
+                    # Empurra título para cima e gráfico para baixo para não bater na legenda
+                    if "Evolução Mensal" in key:
+                        layout_args['margin'] = dict(t=150)
+                        layout_args['title']['y'] = 0.98
+                    
+                    fig_to_export.update_layout(**layout_args)
+
+                    # Geração da Imagem
+                    img_bytes = fig_to_export.to_image(
+                        format="png", 
+                        width=1200, 
+                        height=700, 
+                        scale=2, 
+                        engine="kaleido"
+                    )
+                    
+                    image_stream = io.BytesIO(img_bytes)
+                    worksheet.insert_image('A1', f'{sheet_name}.png', {'image_data': image_stream})
                 except Exception as e:
-                    st.error(f"Falha ao gerar o HTML para '{sheet_name}'. Gráfico não incluído no pacote. Erro: {e}")
-        
-    zip_buffer.seek(0)
+                    print(f"Erro ao converter imagem {key}: {e}")
+                    worksheet.write('A1', f"Erro ao gerar imagem: {e}")
+
+    return output.getvalue()
+
+def create_zip_package(data_dict, filter_info, excel_filename="Relatorio.xlsx"):
+    output_excel = to_excel_with_images(data_dict, filter_info)
+    zip_buffer = io.BytesIO()
+    with zipfile.ZipFile(zip_buffer, "a", zipfile.ZIP_DEFLATED, False) as zip_file:
+        if not excel_filename.lower().endswith(".xlsx"):
+            excel_filename += ".xlsx"
+        zip_file.writestr(excel_filename, output_excel)
     return zip_buffer.getvalue()
